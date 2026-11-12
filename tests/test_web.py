@@ -93,3 +93,22 @@ def test_remote_relay_output_survives_a_cp1252_console():
     out.seek(0)
     import json
     assert json.loads(out.read())["result"]["t"] == "− 0,13% €"
+
+
+def test_phone_app_files_and_offline_cache(client):
+    m = client.get("/manifest.webmanifest")
+    assert m.status_code == 200 and m.json()["display"] == "standalone" and "manifest+json" in m.headers["content-type"]
+    sw = client.get("/sw.js")
+    assert sw.status_code == 200 and "javascript" in sw.headers["content-type"] and "/api" in sw.text
+    for name in ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):
+        r = client.get("/" + name)
+        assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content[:4] == b"\x89PNG"
+    client.post("/login", data={"key": "k3y"})
+    page = client.get("/")
+    assert '<link rel="manifest"' in page.text and "serviceWorker" in page.text
+    out = client.get("/logout", follow_redirects=False)
+    assert out.headers["clear-site-data"] == '"cache"'
+
+
+def test_scheduler_alert_job_skips_without_ntfy(demo_conn):
+    assert web._alerts(demo_conn) == {"skipped": "notifications not configured"}

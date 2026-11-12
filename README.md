@@ -279,6 +279,38 @@ history). Every change goes into the same database and rebuilds the dashboard.
   every hour 08–22h, and a weekly digest on Monday with a notification (`centen digest --notify`). `centen schedule
   remove` deletes them.
 
+## r17: fixed costs, cash forecast, pension, scenario planner, on your phone
+
+- **Vaste kosten** (tab, `centen fixed`, tool `fixed_costs`): every subscription and fixed cost found in your payments,
+  grouped (housing & energy, loan, insurance, subscriptions, children, car, memberships, taxes, …) with the monthly
+  and yearly cost, the next date, price changes of the last 12 months, payments that seem to have stopped,
+  overlapping services and big quarterly or yearly bills coming up. `centen fixed ignore|cancel|confirm|restore
+  <name>` adjusts one; `centen fixed add "<name>" <amount> yearly --next 2027-01-15` adds one the bank data can't see
+  (a card of another bank, paid by your partner).
+- **Prognose** (tab, `centen forecast`, tool `cash_forecast`): expected balances for the coming months per account and
+  for private / company / total, with the lowest point and a warning under your buffer (`"forecast": {"buffer":
+  {"personal": 1000, "business": 5000}}` in config.json). Recurring items on their dates, VAT / corporate tax /
+  dividends / the yearly tax bill as in the same month last year, the rest as the average of the last 6 months
+  (one-offs and investing left out).
+- **Pensioen** (tab, `centen pension --birth-date 1990-05-01 --legal 2100`, tools `pension_overview`,
+  `set_pension_profile`): the four pillars — legal pension (estimate from mypension.be), IPT / groepsverzekering /
+  VAPZ, pensioensparen / langetermijnsparen (2026 maxima checked), own investments — projected to your pension date in
+  today's euros, next to what you spend now.
+- **Planner** (tab, `centen plan`, tool `scenario_plan`): wealth year by year and the age at which it can carry your
+  spending (financial independence), with sliders in the dashboard (extra saving, spending, return, inflation,
+  withdrawal rate, stopping earlier, paying off loans) and a table of standard scenarios.
+- **Op je gsm**: `centen web` serves a web app manifest and a service worker, so you can add the dashboard to your
+  home screen and still read the last version when you're offline. Phones only allow that over **HTTPS**: on a
+  Synology use *Control Panel → Login Portal → Advanced → Reverse Proxy* (e.g. `https://centen.<your-ddns>` →
+  `http://localhost:8770`) with a certificate, or `tailscale serve --bg 8770` over Tailscale. Over plain http the
+  dashboard still works in the phone's browser. The layout adapts to small screens.
+- **Meldingen** via [ntfy](https://ntfy.sh): install the ntfy app, subscribe to a long random topic and run
+  `docker exec -it centen centen notify setup --topic <topic> --public-url https://centen.<your-ddns>`, then
+  `centen notify test`. Every morning (08:30, `schedule.alerts`) you get what's new: a balance forecast under your
+  buffer, a possible double payment, an unusual payment, a price increase, a bank consent about to expire; on Monday
+  the weekly digest. By default a message only says *what kind* of thing happened, without names or amounts, because
+  it passes through the ntfy server (`--detail full` with your own ntfy server).
+
 ## Categories and your own rules
 
 `centen categories` lists them. Fix things from the CLI or by asking Claude:

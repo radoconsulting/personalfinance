@@ -146,10 +146,23 @@ def _extras(conn, today: date) -> dict:
 
     from . import loans
     home = _safe(loans.overview, conn, today)
-    return {"networth_history": _safe(networth.timeline, conn), "tax": _safe(tax_view),
+    return {**_r17(conn, today), "networth_history": _safe(networth.timeline, conn), "tax": _safe(tax_view),
             "home": home if isinstance(home, dict) and (home.get("loans") or home.get("property")) else None,
             "analysis": _safe(analysis.report, conn, today), "review": _safe(review_view),
             "categories": [c[0] for c in CATEGORIES if c[1] != "transfer" or c[0] == "Household transfers"]}
+
+
+def _r17(conn, today: date) -> dict:
+    """r17 sections: fixed costs, cash forecast, pension overview and the scenario planner."""
+    from . import fixed, forecast, pension, planner
+
+    def forecast_view():
+        f = forecast.forecast(conn, today, 6)
+        f["events_next_60_days"] = f["events_next_60_days"][:80]
+        return f
+
+    return {"fixed": _safe(fixed.report, conn, today), "forecast": _safe(forecast_view),
+            "pension": _safe(pension.overview, conn, today), "planner": _safe(planner.plan, conn, today)}
 
 
 def render(data: dict) -> str:

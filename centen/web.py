@@ -58,7 +58,8 @@ def _csrf(key: str) -> str:
 
 # --- schedule -------------------------------------------------------------------------------------
 
-DEFAULT_SCHEDULE = {"sync": ["07:40", "18:40"], "prices_from": 8, "prices_to": 22, "digest": "mon 08:20"}
+DEFAULT_SCHEDULE = {"sync": ["07:40", "18:40"], "prices_from": 8, "prices_to": 22, "digest": "mon 08:20",
+                    "alerts": "08:30"}
 
 
 def _schedule_cfg() -> dict:
@@ -101,9 +102,18 @@ def _prices(c):
 
 
 def _digest(c):
-    from . import digest
+    from . import digest, notify
     d, p = digest.write(c)
+    if notify.configured():
+        notify.send_digest(c, d["headline"])
     return d["headline"]
+
+
+def _alerts(c):
+    from . import notify
+    if not notify.configured():
+        return {"skipped": "notifications not configured"}
+    return notify.run_alerts(c)
 
 
 def scheduler(stop: threading.Event):
@@ -124,6 +134,9 @@ def scheduler(stop: threading.Event):
         if now.strftime("%a").lower().startswith(dday[:3].lower()) and hm == dtime and f"digest {today}" not in done:
             done.add(f"digest {today}")
             _job("digest", _digest)
+        if hm == s.get("alerts") and f"alerts {today}" not in done:
+            done.add(f"alerts {today}")
+            _job("alerts", _alerts)
         if len(done) > 500:
             done = {x for x in done if today in x}
 
@@ -149,6 +162,8 @@ NAV = """<style>
 .centen-nav a:hover,.centen-nav a:focus-visible{background:#efeee9;color:#0b0b0b;outline:none}
 .centen-nav a[aria-current]{background:#0b0b0b;color:#ffffff}
 .centen-nav .sp{flex:1}
+@media (max-width:600px){.centen-nav{flex-wrap:nowrap;overflow-x:auto;padding:6px 10px;gap:2px}
+.centen-nav b{margin-right:4px}.centen-nav a{padding:6px 9px;white-space:nowrap}}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .centen-nav{background:#1d1d1b;border-color:#383835}
 :root:not([data-theme="light"]) .centen-nav b{color:#f0efec}
 :root:not([data-theme="light"]) .centen-nav a{color:#e6e5df}
@@ -178,7 +193,7 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
     from starlette.routing import Mount, Route
 
     from . import app as upd
-    from . import dashboard
+    from . import dashboard, pwa
     from .server import server as mcp
 
     key = key or access_key()
@@ -219,6 +234,7 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
     async def logout(req: Request):
         r = RedirectResponse("/login", 303)
         r.delete_cookie(COOKIE)
+        r.headers["Clear-Site-Data"] = '"cache"'  # the phone's offline copy of the dashboard goes too
         return r
 
     def _dash_file() -> Path:
@@ -232,13 +248,13 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
         if (g := guard(req)):
             return g
         html = _dash_file().read_text(encoding="utf-8").replace("<body>", "<body>" + nav("/"), 1)
-        return secure_headers(HTMLResponse(html))
+        return secure_headers(HTMLResponse(pwa.inject(html)))
 
     async def update_page(req: Request):
         if (g := guard(req)):
             return g
         html = upd.TEMPLATE.read_text(encoding="utf-8").replace("__TOKEN__", csrf).replace("<body>", "<body>" + nav("/bijwerken"), 1)
-        return secure_headers(HTMLResponse(html))
+        return secure_headers(HTMLResponse(pwa.inject(html)))
 
     async def digest_page(req: Request):
         if (g := guard(req)):
@@ -247,7 +263,7 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
         if not p.exists():
             with closing(db.connect()) as c:
                 _digest(c)
-        return secure_headers(HTMLResponse(p.read_text(encoding="utf-8").replace("<body>", "<body>" + nav("/digest"), 1)))
+        return secure_headers(HTMLResponse(pwa.inject(p.read_text(encoding="utf-8").replace("<body>", "<body>" + nav("/digest"), 1))))
 
     async def api_state(req: Request):
         if (g := guard(req, api=True)):
@@ -285,6 +301,19 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
     async def health(req: Request):
         return PlainTextResponse("ok")
 
+    async def manifest(req: Request):
+        return JSONResponse(pwa.MANIFEST, media_type="application/manifest+json")
+
+    async def service_worker(req: Request):
+        return Response(pwa.SERVICE_WORKER, media_type="text/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+    async def icon(req: Request):
+        b = pwa.icon(req.url.path.lstrip("/"))
+        if b is None:
+            return PlainTextResponse("not found", 404)
+        return Response(b, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
+
     class BearerMCP:
         """/mcp: Bearer <key> required."""
 
@@ -312,7 +341,10 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
     routes = [Route("/", index), Route("/login", login, methods=["GET", "POST"]), Route("/logout", logout),
               Route("/bijwerken", update_page), Route("/digest", digest_page), Route("/healthz", health),
               Route("/api/state", api_state), Route("/api/act/{action}", api_act, methods=["POST"]),
-              Route("/api/upload", api_upload, methods=["POST"]), Mount("/", app=BearerMCP(mcp_app))]
+              Route("/api/upload", api_upload, methods=["POST"]),
+              Route("/manifest.webmanifest", manifest), Route("/sw.js", service_worker),
+              *[Route(f"/{n}", icon) for n in pwa.ICONS],
+              Mount("/", app=BearerMCP(mcp_app))]
     return Starlette(routes=routes, lifespan=lifespan)
 
 

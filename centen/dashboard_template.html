@@ -140,6 +140,24 @@ select.cat { font: inherit; font-size: 12.5px; padding: 3px 6px; border-radius: 
 .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .wrap { padding: 14px 10px 48px; }
+  .g4 { grid-template-columns: 1fr 1fr; gap: 10px; } .span2 { grid-column: 1 / -1; }
+  .hero .val { font-size: 34px; } .tile .val { font-size: 19px; } .card { padding: 12px; border-radius: 10px; }
+  .card { overflow-x: auto; } table.t { font-size: 12.5px; } table.t td, table.t th { padding: 6px 5px; }
+  nav.tabs { position: sticky; top: 0; z-index: 5; background: var(--page); margin: 12px -10px 8px; padding: 0 10px; }
+  nav.tabs button { padding: 10px 10px; }
+  .bars { grid-template-columns: minmax(80px, 34%) 1fr auto; }
+  .alert { grid-template-columns: 22px 1fr; } .alert .am { grid-column: 2; text-align: left; }
+  .flow { grid-template-columns: 1fr 18px 1fr; } .flow .what, .flow .amt { grid-column: span 3; text-align: left; }
+  .brand small { display: none; }
+}
+.ctrl { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 18px; }
+.ctrl label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--text-2); }
+.ctrl label b { color: var(--text-1); font-variant-numeric: tabular-nums; }
+.ctrl input[type=range] { width: 100%; accent-color: var(--s1); }
+.ctrl .chk { flex-direction: row; align-items: center; gap: 8px; }
+tr.off td { color: var(--muted); }
   .checklist { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: var(--text-2, inherit); }
 </style>
 </head>
@@ -294,7 +312,7 @@ function niceTicks(lo, hi, n = 5) {
   return out;
 }
 
-function lineChart(host, {labels, series, height = 250, area = false}) {
+function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLabel, refs = []}) {
   host.textContent = "";
   if (!labels.length) { host.append(el("div", {class: "empty"}, "Geen gegevens in deze periode.")); return; }
   if (series.length >= 2) host.append(el("div", {class: "legend"},
@@ -302,7 +320,7 @@ function lineChart(host, {labels, series, height = 250, area = false}) {
   const W = Math.max(320, host.clientWidth || 600), H = height;
   const directLabels = series.length <= 4;
   const m = {l: 52, r: directLabels ? 92 : 16, t: 10, b: 26};
-  const vals = series.flatMap(s => s.values).filter(v => v != null);
+  const vals = series.flatMap(s => s.values).filter(v => v != null).concat(refs.map(r => r.value));
   const ticks = niceTicks(Math.min(0, ...vals), Math.max(0, ...vals), 5);
   const lo = ticks[0], hi = ticks[ticks.length - 1];
   const n = labels.length, iw = W - m.l - m.r, ih = H - m.t - m.b;
@@ -314,7 +332,11 @@ function lineChart(host, {labels, series, height = 250, area = false}) {
     svg.append(sv("text", {x: m.l - 8, y: y(t) + 4, "text-anchor": "end"}, axisEur(t)));
   }
   const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 64))));
-  labels.forEach((l, i) => { if (i % every === 0 || i === n - 1 && n < 14) svg.append(sv("text", {x: x(i), y: H - 6, "text-anchor": "middle"}, mLabel(l))); });
+  labels.forEach((l, i) => { if (i % every === 0 || i === n - 1 && n < 14) svg.append(sv("text", {x: x(i), y: H - 6, "text-anchor": "middle"}, fmtX(l))); });
+  for (const r of refs) {
+    svg.append(sv("line", {x1: m.l, x2: W - m.r, y1: y(r.value), y2: y(r.value), stroke: r.color || "var(--warning)", "stroke-width": 1.5, "stroke-dasharray": "5 4"}));
+    svg.append(sv("text", {x: m.l + 6, y: y(r.value) - 5}, r.label));
+  }
   const ends = [];
   for (const s of series) {
     let d = "";
@@ -347,7 +369,7 @@ function lineChart(host, {labels, series, height = 250, area = false}) {
       marks[k].setAttribute("cx", x(cur)); marks[k].setAttribute("cy", y(v)); marks[k].setAttribute("visibility", "visible"); });
     const r = svg.getBoundingClientRect();
     const e = evt || {clientX: r.left + x(cur), clientY: r.top + m.t + 10};
-    showTip(e, mLabel(labels[cur]), series.map(s => ({name: s.name, value: eur(s.values[cur]), color: s.color})));
+    showTip(e, fmtX(labels[cur], true), series.map(s => ({name: s.name, value: eur(s.values[cur]), color: s.color})));
   };
   hit.addEventListener("pointermove", e => { const r = svg.getBoundingClientRect(); const px = e.clientX - r.left;
     show(Math.round((px - m.l) / (iw / Math.max(1, n - 1))), e); });
@@ -408,9 +430,9 @@ function segmented(host, parts) {
 }
 
 // ---------- state ----------
-const TABS = [["total", "Totaal"], ["personal", "Privé"], ["business", "BV"], ["household", "Gezin"], ["invest", "Beleggingen"], ["tax", "Fiscaal"], ["accounts", "Rekeningen"]];
+const TABS = [["total", "Totaal"], ["personal", "Privé"], ["business", "BV"], ["household", "Gezin"], ["fixed", "Vaste kosten"], ["forecast", "Prognose"], ["invest", "Beleggingen"], ["pension", "Pensioen"], ["planner", "Planner"], ["tax", "Fiscaal"], ["accounts", "Rekeningen"]];
 const PERIOD_TABS = new Set(["total", "personal", "business", "household"]);
-const state = {tab: location.hash.slice(1) || "total", period: D.meta.default_period};
+const state = {tab: location.hash.slice(1) || "total", period: D.meta.default_period, fp: "personal", plan: {}};
 if (!TABS.some(t => t[0] === state.tab)) state.tab = "total";
 const P = () => D.periods[state.period];
 const BROKERS = D.investments.by_destination.filter(d => Math.abs(d.net_deposited) >= 1).map(d => nlName(d.destination));
@@ -451,7 +473,19 @@ function renderTabs() {
 function renderFilters() {
   const f = document.getElementById("filters"); f.textContent = "";
   if (!PERIOD_TABS.has(state.tab)) {
-    f.append(el("span", {class: "note"}, state.tab === "invest" ? "Volledige historie · stand vandaag" : state.tab === "tax" ? `Inkomstenjaar ${D.meta.today.slice(0, 4)} · rekenhulp, geen fiscaal advies` : "Stand vandaag"));
+    const NOTE = {invest: "Volledige historie · stand vandaag", tax: `Inkomstenjaar ${D.meta.today.slice(0, 4)} · rekenhulp, geen fiscaal advies`,
+      fixed: "Gedetecteerd uit je betalingen + wat je zelf toevoegde", forecast: "Schatting voor de komende 6 maanden",
+      pension: "Projectie in euro van vandaag · geen pensioenberekening", planner: "Planningsmodel in euro van vandaag · geen advies"};
+    if (state.tab === "forecast" && D.forecast && !D.forecast.error) {
+      const seg = el("div", {class: "seg", role: "group", "aria-label": "Perspectief"});
+      for (const [k, n] of [["personal", "Privé"], ["business", "BV"], ["total", "Totaal"]]) {
+        if (!D.forecast.perspectives[k]) continue;
+        seg.append(el("button", {type: "button", "aria-pressed": String(k === state.fp), onclick: () => { state.fp = k; render(); }}, n));
+      }
+      f.append(el("span", {class: "lbl"}, "Perspectief"), seg, el("span", {class: "note"}, NOTE.forecast));
+      return;
+    }
+    f.append(el("span", {class: "note"}, NOTE[state.tab] || "Stand vandaag"));
     return;
   }
   const seg = el("div", {class: "seg", role: "group", "aria-label": "Periode"});
@@ -1118,7 +1152,304 @@ function homeCard() {
   return c;
 }
 
-const VIEWS = {tax: viewTax, total: viewTotal, personal: viewPersonal, business: viewBusiness, household: viewHousehold, invest: viewInvest, accounts: viewAccounts};
+// ---------- r17: fixed costs, forecast, pension, planner ----------
+const GROUP_COLOR = {"Wonen & energie": "var(--s1)", "Lening": "var(--s7)", "Verzekeringen": "var(--s3)", "Abonnementen": "var(--s2)",
+  "Kinderen": "var(--s5)", "Mobiliteit": "var(--s4)", "Gezondheid": "var(--s8)", "Lidmaatschappen": "var(--s6)",
+  "Belastingen": "var(--s8)", "Personeel & advies": "var(--s4)", "Naar jou (bezoldiging, huur)": "var(--axis)",
+  "Bankkosten": "var(--muted)", "Sparen & beleggen": "var(--s3)", "Overige": "var(--axis)"};
+const PAID_BY = {"direct debit": "domiciliëring", "standing order": "doorlopende opdracht", "card": "kaart", "transfer": "overschrijving",
+  "instant": "overschrijving", "fee": "bankkosten", "other": "andere", "entered": "zelf ingevoerd"};
+const shortDate = (d, long) => d ? (long ? dLabel(d) : `${+d.slice(8, 10)} ${MONTHS[+d.slice(5, 7) - 1]}`) : "—";
+const scopeNl = s => s === "business" ? "BV" : "Privé";
+function sectionError(v, x, what) {
+  if (!x) { v.append(el("div", {class: "empty"}, `${what}: nog geen gegevens.`)); return true; }
+  if (x.error) { v.append(statusAlert("warning", `${what} kon niet worden opgebouwd`, x.error)); return true; }
+  return false;
+}
+const notesCard = (title, lines) => { const c = card(title, null); c.body.append(el("ul", {class: "checklist"}, lines.map(l => el("li", {}, l)))); return c.root; };
+
+function viewFixed(v) {
+  const F = D.fixed;
+  if (sectionError(v, F, "Vaste kosten")) return;
+  const P = F.totals.personal, B = F.totals.business;
+  const ups = F.price_changes.filter(x => x.direction === "up");
+  const subs = F.items.filter(i => i.status === "active" && i.group === "Abonnementen");
+  v.append(el("div", {class: "grid g4"},
+    el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Vaste kosten privé per maand"), el("div", {class: "val"}, P ? eur(P.monthly) : "—"),
+      el("div", {class: "sub"}, P ? `${eur(P.yearly)} per jaar · ${P.count} posten` + (F.fixed_share_of_income != null ? ` · ${pct(F.fixed_share_of_income)} van je vaste inkomen` : "") +
+        (P.saving_monthly ? ` · daarnaast ${eur(P.saving_monthly)} vast sparen` : "") : "")),
+    HAS_BV && B ? tile("Vaste kosten BV per maand", eur(B.monthly_excl_internal), `${eur(B.yearly_excl_internal)} per jaar, zonder bezoldiging en huur aan jou`) :
+      tile("Abonnementen", String(subs.length), `${eur(subs.reduce((a, i) => a + i.monthly, 0))} per maand`),
+    tile("Prijsstijgingen (12 mnd)", ups.length ? eurS(ups.reduce((a, x) => a + x.per_year, 0)) + " / jaar" : "geen", ups.length ? ups.slice(0, 3).map(x => x.name).join(", ") : "niets duurder geworden"),
+  ));
+  const g = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
+  for (const scope of ["personal", "business"]) {
+    const groups = F.groups.filter(x => x.scope === scope);
+    if (!groups.length) continue;
+    const c = card(`Per groep · ${scopeNl(scope)}`, "Per maand (jaarlijkse en kwartaalbetalingen omgerekend)", {table: () => table([
+      {label: "Groep", get: r => r.group}, {label: "Posten", num: true, get: r => String(r.count)},
+      {label: "Per maand", num: true, get: r => eur(r.monthly)}, {label: "Per jaar", num: true, get: r => eur(r.yearly)}], groups)});
+    g.append(c.root);
+    requestAnimationFrame(() => hbars(c.body, groups, {label: x => x.group, value: x => x.monthly, max: 14,
+      extra: x => [{name: "Per jaar", value: eur(x.yearly)}, {name: "Posten", value: String(x.count)}]}));
+  }
+  v.append(g);
+  const att = [];
+  for (const x of F.price_changes) att.push(statusAlert(x.direction === "up" ? "warning" : "good", `${x.name}: ${x.direction === "up" ? "duurder" : "goedkoper"} (${x.pct > 0 ? "+" : ""}${num1.format(x.pct)} %)`,
+    `${eur(x.from)} → ${eur(x.to)} ${CADENCE[x.cadence] || x.cadence} sinds ${dLabel(x.since)} · ${eurS(x.per_year)} per jaar`, null));
+  for (const x of F.overlaps) att.push(statusAlert("info", `Meerdere ${cat(x.category).toLowerCase()} (${scopeNl(x.scope)})`, `${x.names.join(", ")} · samen ${eur(x.yearly)} per jaar. Gebruik je ze allemaal?`, null));
+  for (const x of F.stopped) att.push(statusAlert("info", `${x.name} lijkt gestopt`, `Laatste betaling ${dLabel(x.last_date)} (${CADENCE[x.cadence] || x.cadence}, ${eur(x.amount)}). Opgezegd? Dan hoeft er niets te gebeuren; anders: kijk na of de betaling mislukte.`, null));
+  for (const x of F.big_coming) att.push(statusAlert("info", `${x.name}: ${eur(x.amount)} rond ${dLabel(x.date)}`, `${CADENCE[x.cadence] || x.cadence} · ${scopeNl(x.scope)}`, null));
+  const a = card("Aandachtspunten", "Prijswijzigingen, overlap, gestopte betalingen en grote rekeningen in de komende 4 maanden");
+  a.body.append(att.length ? el("div", {class: "alerts"}, att) : el("div", {class: "empty"}, "Niets opvallends."));
+  a.root.style.marginTop = "14px";
+  v.append(a.root);
+  for (const scope of ["personal", "business"]) {
+    const rows = F.items.filter(i => i.scope === scope);
+    if (!rows.length) continue;
+    rows.sort((x, y) => (x.status !== "active") - (y.status !== "active"));
+    const c = card(`Alle vaste kosten · ${scopeNl(scope)}`, "Grijs = gestopt of opgezegd. Aanpassen: vraag het Claude (negeren, hernoemen, opgezegd, toevoegen) of centen fixed …");
+    const t = table([{label: "Naam", get: r => el("span", {}, el("i", {class: "key-rect", style: `background:${GROUP_COLOR[r.group] || "var(--axis)"};margin-right:6px`}), r.name,
+        r.source === "manual" ? el("span", {class: "muted"}, " · zelf ingevoerd") : null)},
+      {label: "Groep", get: r => r.group}, {label: "Ritme", get: r => CADENCE[r.cadence] || r.cadence},
+      {label: "Bedrag", num: true, get: r => eur(r.amount)}, {label: "Per jaar", num: true, get: r => r.status === "active" ? eur(r.yearly) : "—"},
+      {label: "Volgende", num: true, get: r => r.status === "active" ? shortDate(r.next_date) : (r.status === "cancelled" ? "opgezegd" : "gestopt")},
+      {label: "Via", get: r => PAID_BY[r.paid_by] || r.paid_by || "—"}], rows);
+    [...t.tBodies[0].rows].forEach((tr, i) => { if (rows[i].status !== "active") tr.className = "off"; });
+    c.body.append(t);
+    c.root.style.marginTop = "14px";
+    v.append(c.root);
+  }
+  if (F.income.length) {
+    const c = card("Vaste inkomsten", "Regelmatige inkomsten die centen herkent (basis voor ‘van je vaste inkomen’)");
+    c.body.append(table([{label: "Van", get: r => r.name}, {label: "Soort", get: r => cat(r.category)}, {label: "Ritme", get: r => CADENCE[r.cadence] || r.cadence},
+      {label: "Bedrag", num: true, get: r => eur(r.amount)}, {label: "Volgende", num: true, get: r => shortDate(r.next_date)}, {label: "", get: r => scopeNl(r.scope)}], F.income));
+    c.root.style.marginTop = "14px";
+    v.append(c.root);
+  }
+}
+
+function viewForecast(v) {
+  const F = D.forecast;
+  if (sectionError(v, F, "Prognose")) return;
+  if (!F.perspectives[state.fp]) state.fp = "personal";
+  const P = F.perspectives[state.fp];
+  if (!P) { v.append(el("div", {class: "empty"}, "Geen rekeningen met een saldo.")); return; }
+  const scopeOk = x => state.fp === "total" || x.scope === state.fp;
+  v.append(el("div", {class: "grid g4"},
+    tile("Nu", eur(P.start), "saldo van je rekeningen"),
+    tile("Laagste punt", eur(P.min), `rond ${dLabel(P.min_date)}` + (P.buffer != null ? ` · buffer ${eur(P.buffer)}` : "")),
+    tile(`Op ${dLabel(F.to)}`, eur(P.end), `${eurS(P.change)} t.o.v. nu`),
+    tile("Naar beleggingen (gemiddeld)", eur(Math.abs(state.fp === "total" ? (F.investing_monthly_avg.personal || 0) + (F.investing_monthly_avg.business || 0) : (F.investing_monthly_avg[state.fp] || 0))),
+      "per maand, níet meegerekend: dat kies je zelf"),
+  ));
+  const warns = F.warnings.filter(scopeOk);
+  if (warns.length) {
+    const w = el("div", {class: "alerts", style: "margin-top:14px"}, warns.map(x => statusAlert(x.severity === "critical" ? "critical" : "warning", x.text, null, x.amount)));
+    v.append(w);
+  }
+  const c = card("Verwacht saldo", "Wekelijks; stippellijn = je buffer (instelbaar in config: forecast.buffer)", {table: () => table([
+    {label: "Datum", get: r => dLabel(r.date)}, {label: "Saldo", num: true, get: r => eur(r.balance)}], P.series)});
+  c.root.style.marginTop = "14px";
+  v.append(c.root);
+  requestAnimationFrame(() => lineChart(c.body, {labels: P.series.map(x => x.date), fmtX: shortDate, area: true,
+    series: [{name: "Saldo", values: P.series.map(x => x.balance), color: SERIES[0]}],
+    refs: P.buffer != null ? [{value: P.buffer, label: "buffer"}] : []}));
+  const accs = F.accounts.filter(scopeOk);
+  const g = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
+  const ca = card("Per rekening", "Laagste punt per rekening; ook verschuivingen tussen je eigen rekeningen tellen hier", {table: () => table([
+    {label: "Rekening", get: r => r.name + (r.estimated_balance ? " (geschat)" : "")}, {label: "Nu", num: true, get: r => eur(r.start)},
+    {label: "Laagste", num: true, get: r => eur(r.min)}, {label: "Wanneer", num: true, get: r => shortDate(r.min_date)}, {label: "Einde", num: true, get: r => eur(r.end)}], accs)});
+  g.append(ca.root);
+  requestAnimationFrame(() => {
+    const ser = accs.filter(a => a.type === "current" || accs.length <= 4).slice(0, 6).map((a, i) =>
+      ({name: a.name, values: F.account_series[a.name], color: `var(--s${(i % 8) + 1})`}));
+    lineChart(ca.body, {labels: F.series_dates, fmtX: shortDate, series: ser, height: 230});
+  });
+  const mrows = F.monthly.filter(m => m.perspective === state.fp);
+  const cm = card("Per maand", "Verwacht in en uit (zonder beleggen)");
+  cm.body.append(table([{label: "Maand", get: r => mLabel(r.month) + (r.partial ? (r.month === F.from.slice(0, 7) ? ` (vanaf ${+F.from.slice(8, 10)})` : ` (t.e.m. ${+F.to.slice(8, 10)})`) : "")}, {label: "In", num: true, get: r => eur(r.in)},
+    {label: "Uit", num: true, get: r => eur(r.out)}, {label: "Netto", num: true, get: r => eurS(r.net)}], mrows));
+  g.append(cm.root);
+  v.append(g);
+  const ev = F.events_next_60_days.filter(scopeOk);
+  const ce = card("Verwacht in de komende 60 dagen", "Vaste betalingen en inkomsten; ‘zoals vorig jaar’ = btw, vennootschapsbelasting, dividend of belastingen van dezelfde maand vorig jaar");
+  ce.body.append(ev.length ? table([{label: "Datum", get: r => shortDate(r.date)}, {label: "Wat", get: r => r.name || "—"},
+    {label: "Soort", get: r => r.kind === "seasonal" ? "zoals vorig jaar" : r.kind === "manual" ? "zelf ingevoerd" : (CADENCE[r.cadence] || "")},
+    {label: "Rekening", get: r => r.account}, {label: "Bedrag", num: true, get: r => eurS(r.amount)}], ev) : el("div", {class: "empty"}, "Niets verwacht."));
+  ce.root.style.marginTop = "14px";
+  v.append(ce.root);
+  const vr = F.variable.filter(scopeOk);
+  const g2 = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
+  const cv = card("Variabel per maand", "Gemiddelde van de laatste 6 volledige maanden, buiten vaste posten");
+  g2.append(cv.root);
+  requestAnimationFrame(() => hbars(cv.body, vr, {label: x => cat(x.category), value: x => x.monthly, signed: true, max: 12}));
+  const lines = F.assumptions.slice();
+  if (F.one_offs_left_out.length) lines.push("Eenmalig, niet meegerekend: " + F.one_offs_left_out.slice(0, 5).map(o => `${o.name || cat(o.category)} ${eur(o.amount)} (${shortDate(o.date)})`).join(", ") + ".");
+  g2.append(notesCard("Hoe deze schatting werkt", lines));
+  v.append(g2);
+}
+
+function viewPension(v) {
+  const O = D.pension;
+  if (sectionError(v, O, "Pensioen")) return;
+  const pil = Object.fromEntries(O.pillars.map(p => [p.pillar, p]));
+  const has = O.years_to_retirement != null;
+  v.append(el("div", {class: "grid g4"},
+    el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Maandinkomen bij pensioen (euro van vandaag)"),
+      el("div", {class: "val"}, has ? eur(O.monthly_income_today_eur) : "—"),
+      el("div", {class: "sub"}, has ? `vanaf ${dLabel(O.retirement_date)} · over ${num1.format(O.years_to_retirement)} jaar` + (O.replacement_ratio != null ? ` · ${pct(O.replacement_ratio)} van je uitgaven nu` : "")
+        : "Geef je geboortedatum en de schatting van mypension.be in (vraag het Claude)")),
+    tile("Uitgaven nu per maand", eur(O.spending_monthly_now), "privé, laatste 12 maanden"),
+    tile(O.gap_monthly_today_eur > 0 ? "Tekort per maand" : "Overschot per maand", has && O.gap_monthly_today_eur != null ? eur(Math.abs(O.gap_monthly_today_eur)) : "—", "t.o.v. je uitgaven nu"),
+  ));
+  if (has) {
+    const c = card("Waar het pensioeninkomen vandaan komt", "Per maand in euro van vandaag");
+    c.root.style.marginTop = "14px";
+    v.append(c.root);
+    requestAnimationFrame(() => segmented(c.body, [1, 2, 3, 4].map((k, i) => ({label: pil[k].label.split(":")[0], value: pil[k].monthly_today_eur || 0, color: SERIES[i]}))));
+  }
+  const g = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
+  for (const k of [1, 2, 3, 4]) {
+    const p = pil[k];
+    const c = card(p.label, p.method);
+    if (k === 1) {
+      c.body.append(el("div", {class: "tile"}, el("div", {class: "val"}, p.monthly_today_eur != null ? eur(p.monthly_today_eur) + " / maand" : "nog niet ingevuld"),
+        el("div", {class: "sub"}, p.partner_monthly_today_eur != null ? `partner: ${eur(p.partner_monthly_today_eur)} / maand` : "Bron: mypension.be → ‘Mijn pensioen’ → raming")));
+    } else if (!p.accounts.length) {
+      c.body.append(el("div", {class: "empty"}, k === 3 ? "Geen pensioensparen of langetermijnsparen gevonden." : "Nog geen rekeningen in deze pijler."));
+    } else {
+      c.body.append(table([{label: "Rekening", get: r => r.name + (r.stale ? " (oude waarde)" : "")},
+        {label: "Nu", num: true, get: r => eur(r.value)}, {label: "Premie / jaar", num: true, get: r => r.premium_assumed ? eur(r.premium_assumed) : "—"},
+        {label: "Bij pensioen*", num: true, get: r => eur(r.expected_today_eur ?? r.projected_today_eur)}], p.accounts));
+      c.body.append(el("div", {class: "note", style: "margin-top:6px"}, `* euro van vandaag, ${pct(p.accounts[0].return_assumed)} rendement per jaar` +
+        (p.accounts.some(a => a.expected_at_retirement) ? "; waar ingevuld: bedrag van de pensioenfiche" : "") + (k === 4 ? "" : ` · na belasting ${eur(p.after_tax_today_eur)}`) + ` · ${eur(p.monthly_today_eur)} / maand`));
+    }
+    g.append(c.root);
+  }
+  v.append(g);
+  const a = card("Aandachtspunten", null);
+  a.body.append(O.checks.length ? el("div", {class: "alerts"}, O.checks.map(x => statusAlert(x.severity === "warning" ? "warning" : "info", x.text, null, null))) : el("div", {class: "empty"}, "Niets."));
+  a.root.style.marginTop = "14px";
+  v.append(a.root);
+  const pr = O.profile;
+  v.append(el("div", {style: "margin-top:14px"}, notesCard("Aannames (aanpasbaar via Claude: set_pension_profile)", [
+    `Pensioenleeftijd ${pr.retirement_age}; ${pr.birth_date ? "geboren " + dLabel(pr.birth_date) : "geboortedatum nog niet ingevuld"}.`,
+    `Rendement 2e/3e pijler ${pct(pr.return_pension)}, eigen beleggingen ${pct(pr.return_investments)}, inflatie ${pct(pr.inflation)} per jaar.`,
+    `2e pijler: ongeveer ${pct(pr.payout_tax)} belasting en bijdragen bij uitkering, verdeeld tot ${pr.live_until} jaar. Eigen beleggingen: ${pct(pr.withdrawal_rate)} per jaar opnemen.`,
+    `Pensioensparen ${O.limits_2026 ? "2026: max " + eur(O.limits_2026.pension_saving["30%"]) + " (30 %) of " + eur(O.limits_2026.pension_saving["25%"]) + " (25 %) per persoon" : ""}.`,
+    O.notes])));
+}
+
+// The same model as centen/planner.py (keep both in step).
+function planProject(I, sc) {
+  const ret = sc.ret ?? I.return, inf = sc.inf ?? I.inflation, wr = sc.wr ?? I.withdrawal_rate;
+  const real = (1 + ret) / (1 + inf) - 1;
+  const company = I.include_company ? ((I.cash_company || 0) + (I.investments_company || 0)) * (1 - (I.company_extraction_tax || 0.15)) : 0;
+  let capital = (I.cash_personal || 0) + (I.investments_personal || 0) + company;
+  let loans = (I.loans || []).filter(x => x.instalment_monthly);
+  const spc = sc.spend || 0, payoff = !!sc.payoff;
+  const instalNow = loans.reduce((a, x) => a + x.instalment_monthly * 12, 0);
+  if (payoff) { capital -= loans.reduce((a, x) => a + (x.outstanding || 0), 0); }
+  let baseSpend = (I.annual_spending || 0) * (1 + spc);
+  if (payoff) baseSpend -= instalNow * (1 + spc);
+  let saving = (I.monthly_saving || 0) * 12 + (sc.extra || 0) * 12 - (I.annual_spending || 0) * spc;
+  if (payoff) { saving += instalNow; loans = []; }
+  const age0 = I.age, retAge = I.retirement_age || 67, endAge = I.live_until || 90;
+  const n = age0 != null ? Math.floor(endAge - age0) + 1 : 40;
+  const pensionY = (I.legal_pension_monthly || 0) * 12, pcap = I.pension_capital_at_retirement_today_eur || 0;
+  const year0 = +I.today.slice(0, 4);
+  const rows = []; let fi = null, depleted = null;
+  for (let i = 0; i <= n; i++) {
+    const y = year0 + i, age = age0 != null ? age0 + i : null;
+    const ended = loans.filter(x => x.ends && +x.ends.slice(0, 4) < y);
+    const spend = baseSpend - ended.reduce((a, x) => a + x.instalment_monthly * 12 * (1 + spc), 0);
+    const retired = age != null && age >= retAge;
+    const working = !retired && (sc.stop == null || age == null || age < sc.stop);
+    const need = Math.max(0, spend - (retired ? pensionY : 0));
+    if (fi == null && capital > 0 && capital * wr >= need) fi = {year: y, age};
+    rows.push({year: y, age, capital, spending: spend, target: need / wr});
+    if (i === n) break;
+    const freed = ended.reduce((a, x) => a + x.instalment_monthly * 12, 0);  // a paid-off loan's instalment is saved
+    let flow = working ? saving + freed : -spend;
+    if (retired) flow = pensionY - spend;
+    capital = capital * (1 + real) + flow;
+    if (retired && Math.abs(age - retAge) < 1 && pcap) capital += pcap;
+    if (capital < 0 && depleted == null) depleted = {year: y + 1, age: age != null ? age + 1 : null};
+  }
+  const atRet = rows.find(r => r.age != null && r.age >= retAge);
+  return {rows, fi, depleted, atRet: atRet ? atRet.capital : null, real};
+}
+
+function viewPlanner(v) {
+  const PL = D.planner;
+  if (sectionError(v, PL, "Planner")) return;
+  const I = PL.inputs, S = state.plan;
+  const ctrl = el("div", {class: "ctrl"});
+  const out = el("div");
+  const slider = (key, label, min, max, step, def, fmt) => {
+    const val = S[key] ?? def;
+    const b = el("b", {}, fmt(val));
+    const inp = el("input", {type: "range", min, max, step, value: val, "aria-label": label});
+    inp.addEventListener("input", () => { S[key] = +inp.value; b.textContent = fmt(+inp.value); draw(); });
+    ctrl.append(el("label", {}, el("span", {}, label + " ", b), inp));
+  };
+  const pctF = x => num1.format(x) + " %";
+  slider("extra", "Extra sparen per maand", 0, 4000, 100, 0, x => eur(x));
+  slider("spend", "Uitgaven t.o.v. nu", -40, 40, 5, 0, x => (x > 0 ? "+" : "") + x + " %");
+  slider("ret", "Rendement per jaar", 0, 10, 0.5, +(I.return * 100).toFixed(1), pctF);
+  slider("inf", "Inflatie per jaar", 0, 5, 0.5, +(I.inflation * 100).toFixed(1), pctF);
+  slider("wr", "Opname per jaar (van je vermogen)", 2, 6, 0.25, +(I.withdrawal_rate * 100).toFixed(2), pctF);
+  if (I.age != null) slider("stop", "Stoppen met werken op", Math.ceil(I.age), I.retirement_age, 1, I.retirement_age, x => x >= I.retirement_age ? "pensioenleeftijd" : x + " jaar");
+  if ((I.loans || []).length) {
+    const cb = el("input", {type: "checkbox"}); cb.checked = !!S.payoff;
+    cb.addEventListener("change", () => { S.payoff = cb.checked; draw(); });
+    ctrl.append(el("label", {class: "chk"}, cb, el("span", {}, "Leningen nu aflossen met je vermogen")));
+  }
+  const reset = el("button", {class: "toggle", type: "button", onclick: () => { state.plan = {}; render(); }}, "Terug naar je cijfers");
+  const cc = card("Wat als…", "Verschuif de schuifjes; de berekening gebeurt hier in je browser");
+  cc.body.append(ctrl, el("div", {style: "margin-top:10px"}, reset));
+  v.append(cc.root, out);
+  function draw() {
+    out.textContent = "";
+    const sc = {extra: S.extra || 0, spend: (S.spend || 0) / 100, ret: S.ret != null ? S.ret / 100 : undefined, inf: S.inf != null ? S.inf / 100 : undefined,
+      wr: S.wr != null ? S.wr / 100 : undefined, stop: S.stop != null && S.stop < I.retirement_age ? S.stop : null, payoff: S.payoff};
+    const r = planProject(I, sc);
+    out.append(el("div", {class: "grid g4", style: "margin-top:14px"},
+      el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Financieel onafhankelijk"),
+        el("div", {class: "val"}, r.fi ? (r.fi.age != null ? `op ${Math.floor(r.fi.age)} jaar` : String(r.fi.year)) : "niet binnen de periode"),
+        el("div", {class: "sub"}, r.fi ? `in ${r.fi.year}: je vermogen × ${pct(sc.wr ?? I.withdrawal_rate)} dekt dan je uitgaven` + (r.fi.age != null && r.fi.age >= I.retirement_age ? " (met je wettelijk pensioen)" : "") : "verhoog het sparen of verlaag de uitgaven")),
+      tile("Vermogen bij pensioen", eur(r.atRet), `euro van vandaag · reëel rendement ${pct(r.real)}`),
+      tile(r.depleted ? "Vermogen op" : `Vermogen op ${I.live_until} jaar`, r.depleted ? (r.depleted.age != null ? `op ${Math.floor(r.depleted.age)} jaar` : String(r.depleted.year)) : eur(r.rows[r.rows.length - 1].capital),
+        r.depleted ? "het geld raakt op vóór het einde" : "euro van vandaag"),
+    ));
+    const c = card("Vermogen per jaar", "Euro van vandaag; oranje = vermogen dat je uitgaven van dat jaar draagt (na je pensioen: min je wettelijk pensioen)", {table: () => table([
+      {label: "Jaar", get: x => String(x.year)}, {label: "Leeftijd", num: true, get: x => x.age != null ? String(Math.floor(x.age)) : "—"},
+      {label: "Vermogen", num: true, get: x => eur(x.capital)}, {label: "Uitgaven", num: true, get: x => eur(x.spending)}], r.rows)});
+    c.root.style.marginTop = "14px";
+    out.append(c.root);
+    requestAnimationFrame(() => lineChart(c.body, {labels: r.rows.map(x => String(x.year)), fmtX: (y, long) => {
+        const row = r.rows.find(x => String(x.year) === y); return long && row && row.age != null ? `${y} · ${Math.floor(row.age)} jaar` : y; },
+      series: [{name: "Vermogen", values: r.rows.map(x => Math.round(x.capital)), color: SERIES[0]},
+               {name: "Nodig om van te leven", values: r.rows.map(x => Math.round(x.target)), color: SERIES[1]}], height: 280}));
+  }
+  draw();
+  const g = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
+  const cs = card("Scenario's", "Elk scenario verandert één ding t.o.v. je cijfers nu");
+  cs.body.append(table([{label: "Scenario", get: r => r.name}, {label: "Onafhankelijk", num: true, get: r => r.fi_age != null ? `${Math.floor(r.fi_age)} jaar (${r.fi_year})` : (r.fi_year || "—")},
+    {label: "Bij pensioen", num: true, get: r => eur(r.capital_at_retirement)}, {label: "Op het einde", num: true, get: r => r.depleted ? "op " + (r.depleted.age != null ? Math.floor(r.depleted.age) + " jaar" : r.depleted.year) : eur(r.end_capital)}], PL.scenarios));
+  g.append(cs.root);
+  g.append(notesCard("Vertrekpunt (uit je gegevens)", [
+    `Leeftijd ${I.age != null ? Math.floor(I.age) : "onbekend (geboortedatum in het pensioenprofiel)"} · pensioen op ${I.retirement_age} · wettelijk pensioen ${I.legal_pension_monthly != null ? eur(I.legal_pension_monthly) + " / maand" : "niet ingevuld"}.`,
+    `Cash privé ${eur(I.cash_personal)}, beleggingen privé ${eur(I.investments_personal)}` + (I.include_company ? `, BV ${eur((I.cash_company || 0) + (I.investments_company || 0))} (telt na ${pct(I.company_extraction_tax)} belasting bij uitkeren)` : "") + ".",
+    `Pensioenkapitaal 2e/3e pijler nu ${eur(I.pension_capital_now)}; vanaf je pensioen ${eur(I.pension_capital_at_retirement_today_eur)} na belasting.`,
+    `Sparen ${eur(I.monthly_saving)} per maand (inkomen − uitgaven, privé + BV, laatste 12 maanden) · uitgaven ${eur(I.annual_spending)} per jaar.`,
+    (I.loans || []).length ? `Leningen: ${I.loans.map(l => `${l.name} ${eur(l.instalment_monthly)}/maand tot ${dLabel(l.ends)}`).join("; ")} (de uitgaven dalen als ze aflopen).` : "Geen leningen met een aflossingsplan.",
+    PL.disclaimer]));
+  v.append(g);
+}
+
+const VIEWS = {fixed: viewFixed, forecast: viewForecast, pension: viewPension, planner: viewPlanner, tax: viewTax, total: viewTotal, personal: viewPersonal, business: viewBusiness, household: viewHousehold, invest: viewInvest, accounts: viewAccounts};
 function render() {
   hideTip();
   renderTabs(); renderFilters();

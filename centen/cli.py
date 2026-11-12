@@ -181,6 +181,93 @@ def _dashboard_note(conn):
         print(f"Dashboard updated: {p}")
 
 
+def cmd_fixed(a):
+    from . import fixed
+    with closing(db.connect()) as conn:
+        if a.action == "add":
+            _print(fixed.add_manual(conn, a.name, a.amount, a.cadence, a.next, a.group, a.scope, a.paid_by))
+            return _dashboard_note(conn)
+        if a.action in ("ignore", "cancel", "confirm", "restore"):
+            st = {"ignore": "ignored", "cancel": "cancelled", "confirm": "confirmed", "restore": "active"}[a.action]
+            _print(fixed.set_item(conn, a.name, st, scope=a.scope))
+            return _dashboard_note(conn)
+        rep = fixed.report(conn, perspective=a.scope)
+    if a.json:
+        return _print(rep)
+    for sc, t in rep["totals"].items():
+        print(f"{'Privé' if sc == 'personal' else 'BV'}: {_eur(t['monthly'])} per maand · {_eur(t['yearly'])} per jaar "
+              f"({t['count']} vaste kosten)")
+    cur = None
+    for i in rep["items"]:
+        if i["status"] != "active":
+            continue
+        if (i["scope"], i["group"]) != cur:
+            cur = (i["scope"], i["group"])
+            print(f"\n  {i['group']} ({i['scope']})")
+        print(f"    {i['name'][:38]:38} {i['cadence']:>14} {_eur(i['amount'])} {_eur(i['yearly'])}/jaar  "
+              f"volgende {i['next_date'] or '—'}")
+    for x in rep["price_changes"]:
+        print(f"  prijs {x['name']}: {x['from']} → {x['to']} ({x['pct']:+} %) sinds {x['since']}")
+    for x in rep["stopped"]:
+        print(f"  gestopt? {x['name']}: laatste betaling {x['last_date']}")
+
+
+def cmd_forecast(a):
+    from . import forecast
+    with closing(db.connect()) as conn:
+        f = forecast.forecast(conn, months=a.months)
+    if a.json:
+        return _print(f)
+    for p, v in f["perspectives"].items():
+        if v:
+            print(f"{p:9} nu {_eur(v['start'])}  einde {_eur(v['end'])}  laagste {_eur(v['min'])} op {v['min_date']}")
+    for acc in f["accounts"]:
+        print(f"  {acc['name'][:30]:30} {_eur(acc['start'])} → {_eur(acc['end'])}  laagste {_eur(acc['min'])} op {acc['min_date']}")
+    for w in f["warnings"]:
+        print("  ! " + w["text"])
+
+
+def cmd_pension(a):
+    from . import pension
+    with closing(db.connect()) as conn:
+        if a.birth_date or a.legal is not None or a.age is not None:
+            pension.set_profile(conn, birth_date=a.birth_date, legal_pension_monthly=a.legal, retirement_age=a.age)
+        o = pension.overview(conn)
+    if a.json:
+        return _print(o)
+    print(f"Pensioen op {o['retirement_date'] or '?'} (nog {o['years_to_retirement'] or '?'} jaar)")
+    for p in o["pillars"]:
+        print(f"  {p['label']:48} nu {_eur(p.get('value_now'))}  per maand later {_eur(p.get('monthly_today_eur'))}")
+    print(f"  samen per maand (euro van vandaag) {_eur(o['monthly_income_today_eur'])}  "
+          f"uitgaven nu {_eur(o['spending_monthly_now'])}")
+    for c in o["checks"]:
+        print("  · " + c["text"])
+
+
+def cmd_plan(a):
+    from . import planner
+    with closing(db.connect()) as conn:
+        r = planner.plan(conn, stop_work_age=a.stop_at, extra_monthly_saving=a.extra or 0.0,
+                         spending_change_pct=(a.spend_change or 0.0) / 100, return_=a.ret / 100 if a.ret else None)
+    if a.json:
+        return _print(r)
+    p = r["projection"]
+    print(f"Financieel onafhankelijk: {p['fi_year'] or 'niet binnen de periode'}"
+          f"{' (leeftijd ' + str(p['fi_age']) + ')' if p['fi_age'] else ''} · vermogen bij pensioen {_eur(p['capital_at_retirement'])}")
+    for s in r["scenarios"]:
+        print(f"  {s['name']:32} FI {s['fi_year'] or '—'}  bij pensioen {_eur(s['capital_at_retirement'])}")
+
+
+def cmd_notify(a):
+    from . import notify
+    if a.action == "setup":
+        return _print(notify.setup(a.topic, a.url, a.token, a.detail, a.public_url))
+    if a.action == "test":
+        return _print(notify.test())
+    with closing(db.connect()) as conn:
+        _print(notify.run_alerts(conn, dry_run=a.action == "preview"))
+
+
 def cmd_dashboard(a):
     from . import dashboard
     with closing(db.connect()) as conn:
@@ -754,6 +841,47 @@ def build_parser():
     s.add_argument("--set", action="append", metavar="ISIN=PRICE", help="Enter a 31/12/2025 price by hand (EUR)")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_tax)
+
+    s = sub.add_parser("fixed", help="Subscriptions and fixed costs (r17)")
+    s.add_argument("action", nargs="?", default="list", choices=["list", "add", "ignore", "cancel", "confirm", "restore"])
+    s.add_argument("name", nargs="?")
+    s.add_argument("amount", nargs="?", type=float)
+    s.add_argument("cadence", nargs="?", default="monthly")
+    s.add_argument("--next", help="next payment date YYYY-MM-DD (add)")
+    s.add_argument("--group")
+    s.add_argument("--scope", choices=["personal", "business"])
+    s.add_argument("--paid-by", dest="paid_by")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_fixed)
+
+    s = sub.add_parser("forecast", help="Expected balances for the coming months (r17)")
+    s.add_argument("--months", type=int, default=6)
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_forecast)
+
+    s = sub.add_parser("pension", help="Pension overview, four pillars (r17)")
+    s.add_argument("--birth-date", dest="birth_date")
+    s.add_argument("--legal", type=float, help="legal pension per month from mypension.be")
+    s.add_argument("--age", type=int, help="retirement age (default 67)")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_pension)
+
+    s = sub.add_parser("plan", help="Scenario planner / financial independence (r17)")
+    s.add_argument("--stop-at", dest="stop_at", type=float, help="age to stop working")
+    s.add_argument("--extra", type=float, help="extra saving per month")
+    s.add_argument("--spend-change", dest="spend_change", type=float, help="percent, e.g. -10")
+    s.add_argument("--return", dest="ret", type=float, help="expected return in percent")
+    s.add_argument("--json", action="store_true")
+    s.set_defaults(func=cmd_plan)
+
+    s = sub.add_parser("notify", help="Push notifications to your phone via ntfy (r17)")
+    s.add_argument("action", choices=["setup", "test", "preview", "send"])
+    s.add_argument("--topic")
+    s.add_argument("--url")
+    s.add_argument("--token")
+    s.add_argument("--detail", choices=["short", "full"])
+    s.add_argument("--public-url", dest="public_url")
+    s.set_defaults(func=cmd_notify)
 
     s = sub.add_parser("networth", help="Net worth per month (reconstructed) and the daily snapshots")
     s.add_argument("--months", type=int)

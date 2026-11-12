@@ -79,6 +79,12 @@ bank history is missing), `uncategorised_payments` + `label_merchants` (clear ou
 When the user wants to update figures themselves, `open_update_app` opens a local form app for it. The dashboard has a tab
 "Fiscaal" for the tax view.
 
+r17 additions: `fixed_costs` (subscriptions and fixed costs grouped, price increases, stopped payments, overlapping
+services; adjust with `set_fixed_cost`, add missing ones with `add_fixed_cost`), `cash_forecast` (expected balances for
+the coming months with low points and warnings), `pension_overview` + `set_pension_profile` (the four pillars, projected
+to the pension date), `scenario_plan` (wealth projection and financial independence with what-if scenarios) and
+`phone_notifications` (ntfy push to the phone). Dashboard tabs: "Vaste kosten", "Prognose", "Pensioen", "Planner".
+
 How to help:
 - Answer in the user's language (often Dutch or French) and in everyday words. Explain Belgian banking terms when
   they matter (domiciliëring = direct debit, gestructureerde mededeling, voorschotfactuur, debetrente, Groeipakket).
@@ -857,6 +863,169 @@ def open_update_app() -> str:
     except OSError as e:
         return _out({"error": str(e)})
     return _out({"url": url, "note": "Runs as long as Claude Desktop is open; every change also rebuilds the dashboard."})
+
+
+# --- r17: fixed costs, cash forecast, pension, scenario planner, phone notifications ---------------------------
+
+FixedGroup = Literal["Wonen & energie", "Lening", "Verzekeringen", "Abonnementen", "Kinderen", "Mobiliteit",
+                     "Gezondheid", "Lidmaatschappen", "Belastingen", "Personeel & advies",
+                     "Naar jou (bezoldiging, huur)", "Bankkosten", "Sparen & beleggen", "Overige"]
+Cadence = Literal["weekly", "every 2 weeks", "monthly", "every 2 months", "quarterly", "every 6 months", "yearly"]
+
+
+@_tool(READ)
+def fixed_costs(perspective: Optional[Literal["personal", "business"]] = None, include_items: bool = True) -> str:
+    """Subscriptions and fixed costs, grouped (housing & energy, loan, insurance, subscriptions, children, car,
+    memberships, taxes, staff & advisers, money to the owner, bank fees, saving): monthly and yearly totals per
+    perspective and group, every item with cadence, typical amount, next date and status (active / stopped /
+    cancelled), price changes of the last 12 months with the extra cost per year, payments that seem to have stopped,
+    overlapping services (several streaming services or telecom contracts), big quarterly or yearly bills in the next
+    4 months, regular income, and the share of regular income that fixed costs take. Use for "what are my fixed
+    costs?", "which subscriptions do I have?", "what got more expensive?". To act: set_fixed_cost / add_fixed_cost;
+    cancelling itself happens in the banking app (stop the domiciliëring) or at the provider."""
+    from . import fixed
+    with _conn() as c:
+        rep = fixed.report(c, _today(), perspective)
+        if not include_items:
+            rep.pop("items")
+        return _out(rep)
+
+
+@_tool(LOCAL_EDIT)
+def set_fixed_cost(name: str, status: Optional[Literal["confirmed", "ignored", "cancelled", "active"]] = None,
+                   new_name: Optional[str] = None, group: Optional[FixedGroup] = None, note: Optional[str] = None,
+                   scope: Optional[Literal["personal", "business"]] = None) -> str:
+    """Adjust a fixed cost from fixed_costs: ignored = not a fixed cost (it disappears from the list and the forecast),
+    cancelled = the user stopped it (no longer counted or expected), confirmed = keep it as detected, active = undo
+    an earlier ignored / cancelled; rename it or move it to another group. Only the local copy changes."""
+    from . import fixed
+    return _edit_call(lambda c: fixed.set_item(c, name, status, new_name, group, note, scope, _today()))
+
+
+@_tool(LOCAL_EDIT)
+def add_fixed_cost(name: str, amount: float, cadence: Cadence, next_date: Optional[str] = None,
+                   group: Optional[FixedGroup] = None, scope: Literal["personal", "business"] = "personal",
+                   paid_by: Optional[str] = None, note: Optional[str] = None) -> str:
+    """Add a fixed cost the bank data can't show (paid with a card of a bank that isn't linked, by a partner, in cash,
+    or a yearly bill that hasn't been paid yet in the history). amount = cost per payment (positive), next_date =
+    YYYY-MM-DD of the next payment. It counts in fixed_costs and in the cash forecast. To stop it later:
+    set_fixed_cost(name, status='cancelled')."""
+    from . import fixed
+    return _edit_call(lambda c: fixed.add_manual(c, name, amount, cadence, next_date, group, scope, paid_by, note))
+
+
+@_tool(READ)
+def cash_forecast(months: int = 6, perspective: Literal["personal", "business", "total"] = "personal",
+                  include_accounts: bool = True) -> str:
+    """Expected cash for the coming months (1 to 18): per perspective the balance now, at the end, the lowest point
+    and its date; per bank account the same plus its average variable flow; month by month money in and out; the
+    expected payments of the next 60 days; warnings when an account may go below zero or the cash drops under the
+    buffer (config forecast.buffer, default € 1.000 personal, € 5.000 business). Built from recurring payments, the
+    same month last year for VAT / corporate tax / dividends / the yearly tax bill, and the average of the other
+    flows over the last 6 months (one-offs ≥ € 5.000 and money moved to investments left out). An estimate: present
+    the low points and their dates, not cents."""
+    from . import forecast
+    with _conn() as c:
+        f = forecast.forecast(c, _today(), months)
+    p = f["perspectives"].get(perspective)
+    out = {"from": f["from"], "to": f["to"], "perspective": perspective,
+           "summary": {k: v for k, v in (p or {}).items() if k != "series"} if p else None,
+           "series": p["series"] if p else [], "other_perspectives": {k: {kk: vv for kk, vv in v.items() if kk != "series"}
+                                                                      for k, v in f["perspectives"].items() if v and k != perspective},
+           "monthly": [m for m in f["monthly"] if m["perspective"] == perspective],
+           "events_next_60_days": [e for e in f["events_next_60_days"] if perspective == "total" or e["scope"] == perspective],
+           "variable_monthly": [v for v in f["variable"] if perspective == "total" or v["scope"] == perspective],
+           "one_offs_left_out": f["one_offs_left_out"], "investing_monthly_avg": f["investing_monthly_avg"],
+           "warnings": f["warnings"], "assumptions": f["assumptions"]}
+    if include_accounts:
+        out["accounts"] = [a for a in f["accounts"] if perspective == "total" or a["scope"] == perspective]
+    return _out(out)
+
+
+@_tool(READ)
+def pension_overview() -> str:
+    """The four pension pillars: 1 legal pension (estimate from mypension.be, entered), 2 supplementary pension via
+    work (IPT, groepsverzekering, VAPZ, POZ: the pension accounts), 3 pensioensparen / langetermijnsparen, 4 own savings
+    and investments. Per pillar the value now, the yearly premium seen, a projection at the pension date in today's
+    euros, after a rough payout tax, and the monthly income that gives; together compared with today's spending
+    (replacement ratio, gap). Plus checks: pensioensparen room this year (2026: € 1.050 or € 1.350), stale reserve
+    values, the 80 % rule for premiums paid by the company. Missing birth date or legal pension estimate is listed in
+    needs: ask the user and save it with set_pension_profile. A planning aid; the pension fiche and mypension.be are
+    leading."""
+    from . import pension
+    with _conn() as c:
+        return _out(pension.overview(c, _today()))
+
+
+class PensionAccountSetting(TypedDict, total=False):
+    account: str
+    pillar: int
+    expected_at_retirement: float
+    premium_yearly: float
+
+
+@_tool(LOCAL_EDIT)
+def set_pension_profile(birth_date: Optional[str] = None, retirement_age: Optional[int] = None,
+                        legal_pension_monthly: Optional[float] = None,
+                        partner_legal_pension_monthly: Optional[float] = None,
+                        return_pension: Optional[float] = None, return_investments: Optional[float] = None,
+                        inflation: Optional[float] = None, payout_tax: Optional[float] = None,
+                        withdrawal_rate: Optional[float] = None, live_until: Optional[int] = None,
+                        accounts: Optional[list[PensionAccountSetting]] = None) -> str:
+    """Save what the pension overview and the planner need: birth_date (YYYY-MM-DD), retirement_age (default 67),
+    legal_pension_monthly (gross per month in today's euros, from mypension.be), assumptions as fractions (0.025 =
+    2,5 %): return_pension (pillars 2/3), return_investments (pillar 4), inflation, payout_tax (2nd pillar),
+    withdrawal_rate; per pension account: pillar (2/3/4), expected_at_retirement (from the pension fiche) or
+    premium_yearly. Only what you pass changes."""
+    from . import pension
+    acc = {a["account"]: {k: v for k, v in a.items() if k != "account"} for a in (accounts or [])}
+    return _edit_call(lambda c: pension.set_profile(
+        c, birth_date=birth_date, retirement_age=retirement_age, legal_pension_monthly=legal_pension_monthly,
+        partner_legal_pension_monthly=partner_legal_pension_monthly, return_pension=return_pension,
+        return_investments=return_investments, inflation=inflation, payout_tax=payout_tax,
+        withdrawal_rate=withdrawal_rate, live_until=live_until, accounts=acc))
+
+
+@_tool(READ)
+def scenario_plan(stop_work_age: Optional[float] = None, extra_monthly_saving: float = 0.0,
+                  spending_change_pct: float = 0.0, expected_return: Optional[float] = None,
+                  inflation: Optional[float] = None, pay_off_loans_now: bool = False,
+                  monthly_saving: Optional[float] = None, annual_spending: Optional[float] = None,
+                  include_company: Optional[bool] = None, withdrawal_rate: Optional[float] = None) -> str:
+    """Scenario planner / financial independence: wealth year by year in today's euros from the real starting point
+    (cash, investments, company money after an extraction tax, pension capital from the pension date, legal pension,
+    loans that end), with the year and age at which capital × withdrawal rate covers spending, capital at the pension
+    date and whether it runs out. Change the assumptions to answer "what if": stop_work_age, extra_monthly_saving,
+    spending_change_pct (-0.1 = 10 % less), expected_return / inflation (fractions), pay_off_loans_now, or override
+    monthly_saving / annual_spending. Always also returns a comparison of standard scenarios. A planning model, not
+    advice; mention the assumptions."""
+    from . import planner
+    with _conn() as c:
+        res = planner.plan(c, _today(), stop_work_age=stop_work_age, extra_monthly_saving=extra_monthly_saving,
+                           spending_change_pct=spending_change_pct, return_=expected_return, inflation=inflation,
+                           pay_off_loans_now=pay_off_loans_now, withdrawal_rate=withdrawal_rate,
+                           monthly_saving=monthly_saving, annual_spending=annual_spending,
+                           include_company=include_company)
+    yrs = res["projection"]["years"]
+    res["projection"]["years"] = yrs[::5] + ([yrs[-1]] if (len(yrs) - 1) % 5 else [])
+    return _out(res)
+
+
+@_tool(LOCAL_EDIT)
+def phone_notifications(action: Literal["status", "test", "send_now", "preview"] = "status") -> str:
+    """Push notifications to the user's phone via ntfy: status (configured or not, detail level), test (send a test
+    message), preview (what would be sent now, without sending), send_now (send what's new now; normally the server
+    does this every morning). Setting up needs the topic: on the server run
+    `centen notify setup --topic <long random name>` and subscribe to that topic in the ntfy app."""
+    from . import notify
+    with _conn() as c:
+        if action == "test":
+            return _out(notify.test())
+        if action in ("send_now", "preview"):
+            return _out(notify.run_alerts(c, _today(), dry_run=action == "preview"))
+    s = notify.settings()
+    return _out({"configured": notify.configured(), "server": s["ntfy"]["url"], "detail": s["detail"],
+                 "opens": s.get("public_url") or None})
 
 
 # --- prompts (show up as slash commands in Claude Desktop) ---------------------------
