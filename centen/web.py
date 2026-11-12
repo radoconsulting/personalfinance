@@ -141,9 +141,34 @@ p{color:#898781;font-size:13px}.e{color:#c62f2e}</style>
 <input id=k name=key type=password autocomplete=current-password autofocus>__ERR__<button>Aanmelden</button>
 <p>De sleutel staat in de map met je gegevens (web_key) of in de omgevingsvariabele CENTEN_KEY.</p></form></html>"""
 
-NAV = ('<div style="position:fixed;top:10px;right:14px;z-index:50;font:13px system-ui,sans-serif">'
-       '<a href="/" style="margin-right:12px">Dashboard</a><a href="/bijwerken" style="margin-right:12px">Bijwerken</a>'
-       '<a href="/digest" style="margin-right:12px">Weekoverzicht</a><a href="/logout">Afmelden</a></div>')
+NAV = """<style>
+.centen-nav{display:flex;gap:4px;align-items:center;flex-wrap:wrap;padding:8px 16px;font:500 13.5px system-ui,-apple-system,
+"Segoe UI",sans-serif;background:#ffffff;border-bottom:1px solid #e1e0d9}
+.centen-nav b{margin-right:10px;font-weight:650;color:#0b0b0b}
+.centen-nav a{color:#2c2c2a;text-decoration:none;padding:5px 11px;border-radius:7px}
+.centen-nav a:hover,.centen-nav a:focus-visible{background:#efeee9;color:#0b0b0b;outline:none}
+.centen-nav a[aria-current]{background:#0b0b0b;color:#ffffff}
+.centen-nav .sp{flex:1}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .centen-nav{background:#1d1d1b;border-color:#383835}
+:root:not([data-theme="light"]) .centen-nav b{color:#f0efec}
+:root:not([data-theme="light"]) .centen-nav a{color:#e6e5df}
+:root:not([data-theme="light"]) .centen-nav a:hover{background:#2c2c2a;color:#ffffff}
+:root:not([data-theme="light"]) .centen-nav a[aria-current]{background:#f0efec;color:#141413}}
+:root[data-theme="dark"] .centen-nav{background:#1d1d1b;border-color:#383835}
+:root[data-theme="dark"] .centen-nav b{color:#f0efec}
+:root[data-theme="dark"] .centen-nav a{color:#e6e5df}
+:root[data-theme="dark"] .centen-nav a:hover{background:#2c2c2a;color:#ffffff}
+:root[data-theme="dark"] .centen-nav a[aria-current]{background:#f0efec;color:#141413}
+</style><nav class="centen-nav" aria-label="centen"><b>centen</b><a href="/" __A_/__>Dashboard</a>
+<a href="/bijwerken" __A_/bijwerken__>Bijwerken</a><a href="/digest" __A_/digest__>Weekoverzicht</a>
+<span class="sp"></span><a href="/logout">Afmelden</a></nav>"""
+
+
+def nav(current: str) -> str:
+    out = NAV
+    for p in ("/", "/bijwerken", "/digest"):
+        out = out.replace(f"__A_{p}__", 'aria-current="page"' if p == current else "")
+    return out
 
 
 def build_app(key: str | None = None, run_scheduler: bool = True):
@@ -206,13 +231,13 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
     async def index(req: Request):
         if (g := guard(req)):
             return g
-        html = _dash_file().read_text(encoding="utf-8").replace("<body>", "<body>" + NAV, 1)
+        html = _dash_file().read_text(encoding="utf-8").replace("<body>", "<body>" + nav("/"), 1)
         return secure_headers(HTMLResponse(html))
 
     async def update_page(req: Request):
         if (g := guard(req)):
             return g
-        html = upd.TEMPLATE.read_text(encoding="utf-8").replace("__TOKEN__", csrf).replace("<body>", "<body>" + NAV, 1)
+        html = upd.TEMPLATE.read_text(encoding="utf-8").replace("__TOKEN__", csrf).replace("<body>", "<body>" + nav("/bijwerken"), 1)
         return secure_headers(HTMLResponse(html))
 
     async def digest_page(req: Request):
@@ -222,7 +247,7 @@ def build_app(key: str | None = None, run_scheduler: bool = True):
         if not p.exists():
             with closing(db.connect()) as c:
                 _digest(c)
-        return secure_headers(HTMLResponse(p.read_text(encoding="utf-8").replace("<body>", "<body>" + NAV, 1)))
+        return secure_headers(HTMLResponse(p.read_text(encoding="utf-8").replace("<body>", "<body>" + nav("/digest"), 1)))
 
     async def api_state(req: Request):
         if (g := guard(req, api=True)):

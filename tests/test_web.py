@@ -70,3 +70,12 @@ def test_access_key_is_generated_once(tmp_path, monkeypatch):
     assert len(k) >= 24 and web.access_key() == k and (tmp_path / "web_key").read_text() == k
     monkeypatch.setenv("CENTEN_KEY", "fromenv")
     assert web.access_key() == "fromenv"
+
+
+def test_nav_is_themed_and_marks_current_page():
+    from centen import web
+    html = web.nav("/bijwerken")
+    assert 'class="centen-nav"' in html
+    assert '[data-theme="dark"] .centen-nav' in html and "prefers-color-scheme: dark" in html
+    assert 'href="/bijwerken" aria-current="page"' in html
+    assert 'href="/" aria-current' not in html and "__A_" not in html
