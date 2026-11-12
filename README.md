@@ -59,8 +59,8 @@ One container then serves the **dashboard**, the **update app** and the **MCP to
 schedule itself (bank sync at 07:40 and 18:40, prices every hour, price history daily, a digest on Monday).
 
 1. Make a folder on the NAS, e.g. `/volume1/docker/centen`, and put `compose.yaml` and `.env.example` from this
-   repository in it. Copy `.env.example` to `.env` and set a long random `CENTEN_KEY`, plus `PUID`/`PGID` of the
-   user that owns the folder.
+   repository in it. Copy `.env.example` to `.env` and set a long random `CENTEN_KEY`. The container runs as the
+   owner of the `data` folder by itself (set `PUID`/`PGID` only to pick another user).
 2. Start it: Synology **Container Manager → Project → Create**, choose the folder (it reads `compose.yaml`);
    or over SSH `docker compose up -d`. Images exist for amd64 and arm64.
 3. Open `http://<nas>:8770`, log in with the key. Empty at first: either

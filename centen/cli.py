@@ -498,7 +498,7 @@ def cmd_nas_export(a):
     key = secrets.token_urlsafe(24)
     env = out / ".env"
     if not env.exists():
-        env.write_text(f"CENTEN_KEY={key}\nPUID=1000\nPGID=1000\n", encoding="utf-8")
+        env.write_text(f"CENTEN_KEY={key}\n", encoding="utf-8")
     else:
         key = next((l.split("=", 1)[1].strip() for l in env.read_text(encoding="utf-8").splitlines()
                     if l.startswith("CENTEN_KEY=")), key)

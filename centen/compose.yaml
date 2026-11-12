@@ -13,5 +13,7 @@ services:
       - ./imports:/imports       # optional: drop broker / bank exports here
     environment:
       TZ: Europe/Brussels
-      CENTEN_KEY: ${CENTEN_KEY:?set CENTEN_KEY in .env}   # access key for the web pages and for Claude
-    user: "${PUID:-1000}:${PGID:-1000}"
+      CENTEN_KEY: ${CENTEN_KEY:-}   # access key (from .env); empty = generated once into data/web_key
+      # centen runs as the owner of ./data; set PUID / PGID (in .env) only to choose another user
+      PUID: ${PUID:-}
+      PGID: ${PGID:-}
