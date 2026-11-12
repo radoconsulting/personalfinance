@@ -1,0 +1,10 @@
+.git
+.venv
+data
+imports
+backups
+*.db
+*.pem
+*.tgz
+**/__pycache__
+.pytest_cache

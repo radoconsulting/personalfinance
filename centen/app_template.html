@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>centen · bijwerken</title>
+<style>
+:root { color-scheme: light dark;
+  --bg: #f7f6f2; --card: #ffffff; --text-1: #0b0b0b; --text-2: #52514e; --muted: #898781; --grid: #e1e0d9; --axis: #c3c2b7;
+  --accent: #2a78d6; --good: #0a7d0a; --warn: #b26b00; --bad: #c62f2e; --wash: rgba(11,11,11,0.04); }
+@media (prefers-color-scheme: dark) { :root { --bg: #141413; --card: #1d1d1b; --text-1: #f0efec; --text-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --accent: #3987e5; --good: #0ca30c; --warn: #d8902a; --bad: #e66767; --wash: rgba(255,255,255,0.05); } }
+* { box-sizing: border-box; } [hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text-1); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 24px 20px 60px; }
+header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+h1 { font-size: 20px; margin: 0; } h1 span { color: var(--muted); font-weight: 400; }
+.meta { color: var(--muted); font-size: 12.5px; }
+nav { display: flex; gap: 4px; margin: 18px 0 14px; border-bottom: 1px solid var(--grid); overflow-x: auto; }
+nav button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; font: inherit; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+nav button[aria-selected="true"] { color: var(--text-1); border-color: var(--text-1); font-weight: 600; }
+.card { background: var(--card); border: 1px solid var(--grid); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+.card h2 { font-size: 15px; margin: 0 0 2px; } .card .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+td { padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+input, select { font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--axis); border-radius: 7px; background: var(--card); color: var(--text-1); }
+input.amt { width: 120px; text-align: right; } input.dt { width: 128px; } select { max-width: 220px; }
+button.go { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+button.go:disabled { opacity: .5; cursor: default; }
+button.ghost { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--axis); background: none; color: var(--text-2); cursor: pointer; }
+.chip { display: inline-block; font-size: 11.5px; padding: 1px 8px; border-radius: 99px; background: var(--wash); color: var(--text-2); margin-left: 6px; }
+.chip.warn { color: var(--warn); } .chip.good { color: var(--good); }
+.muted { color: var(--muted); } .small { font-size: 12px; }
+.todo li { margin: 4px 0; } .todo b { font-weight: 600; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.toast { position: fixed; right: 18px; bottom: 18px; max-width: 420px; padding: 10px 14px; border-radius: 10px; background: var(--text-1); color: var(--bg);
+  font-size: 13px; box-shadow: 0 6px 24px rgba(0,0,0,.18); display: none; }
+.toast.err { background: var(--bad); color: #fff; }
+.drop { border: 1.5px dashed var(--axis); border-radius: 10px; padding: 20px; text-align: center; color: var(--muted); }
+.drop.over { border-color: var(--accent); color: var(--text-1); }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>centen <span>cijfers bijwerken</span></h1><div class="meta" id="meta"></div></header>
+  <nav id="tabs" role="tablist"></nav>
+  <main id="view"><div class="card">Laden…</div></main>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script>
+"use strict";
+const KEY = "__TOKEN__";
+let S = null, tab = "todo", scope = "personal", dim = "class";
+const fmt0 = new Intl.NumberFormat("nl-BE", {style: "currency", currency: "EUR", maximumFractionDigits: 0});
+const fmt2 = new Intl.NumberFormat("nl-BE", {style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2});
+const eur = v => v == null ? "—" : (Math.abs(v) < 1000 ? fmt2 : fmt0).format(v);
+const MONTHS = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
+const dL = d => d ? `${+d.slice(8, 10)} ${MONTHS[+d.slice(5, 7) - 1]} ${d.slice(0, 4)}` : "—";
+const TYPE = {investment: "Beleggingsrekening", crypto: "Crypto", pension: "Pensioen", insurance: "Tak 21/23", property: "Vastgoed", asset: "Andere", loan: "Lening"};
+const CAT = {"Salary": "Loon", "Refunds": "Terugbetalingen", "Gifts received": "Schenkingen ontvangen", "Benefits & allowances": "Uitkeringen & premies",
+  "Rental income": "Huurinkomsten", "Interest": "Interest", "Tax refund": "Belastingteruggave", "Household transfers": "Gezin", "Own accounts": "Eigen rekeningen",
+  "Savings & investments": "Sparen & beleggen", "Rent": "Huur", "Loans & mortgage": "Leningen", "Energy": "Energie", "Water": "Water", "Telecom & internet": "Telecom & internet",
+  "Home & DIY": "Wonen & doe-het-zelf", "Groceries": "Boodschappen", "Restaurants & takeaway": "Restaurant & afhaal", "Insurance": "Verzekeringen",
+  "Health insurance (mutualiteit)": "Ziekenfonds", "Healthcare": "Gezondheid", "Public transport & taxi": "Openbaar vervoer & taxi", "Fuel": "Brandstof",
+  "EV charging": "Laden", "Parking & tolls": "Parking & tol", "Car & maintenance": "Auto", "Taxes & social security": "Belastingen & sociale bijdragen",
+  "Childcare & school": "Kinderopvang & school", "Subscriptions & streaming": "Abonnementen", "News & magazines": "Kranten", "Shopping": "Shopping",
+  "Clothing & shoes": "Kleding & schoenen", "Electronics": "Elektronica", "Drugstore & personal care": "Drogisterij & verzorging", "Pets": "Huisdieren",
+  "Leisure & sport": "Vrije tijd & sport", "Travel & holidays": "Reizen", "Gifts & donations": "Giften", "Education": "Opleiding", "Post & shipping": "Post",
+  "Bank fees": "Bankkosten", "Cash withdrawal": "Cash", "Online payments": "Online betalingen", "Revenue": "Omzet", "VAT": "Btw",
+  "Corporate tax": "Vennootschapsbelasting", "Withholding tax": "Roerende voorheffing", "Payroll & social secretariat": "Sociaal secretariaat",
+  "Accounting & advisory": "Boekhouding & advies", "Director remuneration": "Bezoldiging bedrijfsleider", "Dividends": "Dividenden",
+  "Company current account": "Rekening-courant BV", "Credit card bill": "Kredietkaart", "Child benefit (Groeipakket)": "Groeipakket",
+  "Healthcare refunds": "Terugbetaling ziekenfonds"};
+const cat = c => CAT[c] || c;
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return e;
+}
+function toast(msg, err) {
+  const t = document.getElementById("toast"); t.textContent = msg; t.className = "toast" + (err ? " err" : ""); t.style.display = "block";
+  clearTimeout(toast.t); toast.t = setTimeout(() => { t.style.display = "none"; }, err ? 7000 : 3500);
+}
+async function load() {
+  const r = await fetch("/api/state", {headers: {"X-Centen-Key": KEY}});
+  if (!r.ok) { document.getElementById("view").textContent = "Geen toegang: open de app opnieuw via centen app."; return; }
+  S = await r.json();
+  document.getElementById("meta").textContent = `Gegevens van ${dL(S.today)} ${S.generated} · enkel op deze computer · elke wijziging werkt ook het dashboard bij`;
+  render();
+}
+async function post(action, body, btn, okMsg) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch("/api/act/" + action, {method: "POST", headers: {"X-Centen-Key": KEY, "Content-Type": "application/json"}, body: JSON.stringify(body)});
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    toast(okMsg || "Opgeslagen ✓"); await load();
+  } catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
+}
+const amt = (ph) => el("input", {class: "amt", inputmode: "decimal", placeholder: ph || "bedrag", "aria-label": ph || "bedrag"});
+const dt = () => { const i = el("input", {class: "dt", type: "date", "aria-label": "datum"}); i.value = S.today; return i; };
+const ageDays = d => d ? Math.round((new Date(S.today) - new Date(d)) / 864e5) : null;
+
+const TABS = [["todo", "Te doen"], ["savings", "Spaarrekeningen"], ["assets", "Beleggingen & pensioen"], ["home", "Woning & leningen"],
+  ["label", "Labelen"], ["import", "Bestanden"], ["targets", "Doelen"], ["new", "Nieuwe rekening"]];
+function render() {
+  const nav = document.getElementById("tabs"); nav.textContent = "";
+  for (const [id, name] of TABS) nav.append(el("button", {role: "tab", "aria-selected": String(id === tab), onclick: () => { tab = id; render(); }}, name));
+  const v = document.getElementById("view"); v.textContent = "";
+  ({todo: vTodo, savings: vSavings, assets: vAssets, home: vHome, label: vLabel, import: vImport, targets: vTargets, new: vNew})[tab](v);
+}
+
+function todoItems() {
+  const out = [];
+  for (const s of S.savings) {
+    const d = s.balance_entered && s.balance_entered.date, a = ageDays(d);
+    if (!d) out.push([`Spaarrekening ${s.name}: nog geen saldo`, "savings"]);
+    else if (a > 180 || (S.today.slice(5) < "02-15" && d < S.today.slice(0, 4) + "-01-01")) out.push([`Spaarrekening ${s.name}: saldo van ${dL(d)} (interest bijschrijven?)`, "savings"]);
+  }
+  for (const a of S.assets) {
+    if (a.type === "loan") { if (!a.plan) out.push([`Lening ${a.name}: nog geen aflossingsplan`, "home"]); continue; }
+    if (a.live_priced) continue;
+    if (!a.value_entered) out.push([`${a.name}: nog geen waarde`, a.type === "property" ? "home" : "assets"]);
+    else if (a.stale) out.push([`${a.name}: waarde is ${a.days_since_value} dagen oud`, a.type === "property" ? "home" : "assets"]);
+  }
+  if (S.missing_photo.length) out.push([`Fotomoment 31/12/2025 ontbreekt voor ${S.missing_photo.length} positie(s)`, "assets"]);
+  const q = S.review.personal; if (q.groups) out.push([`${q.groups} handelaars nog te labelen (${eur(q.other_expenses)})`, "label"]);
+  return out;
+}
+function vTodo(v) {
+  const items = todoItems();
+  const c = el("div", {class: "card"}, el("h2", {}, "Wat kan je bijwerken"), el("div", {class: "sub"}, "Cijfers die niet via je bank of de koersen binnenkomen"));
+  c.append(items.length ? el("ul", {class: "todo"}, items.map(([t, to]) => el("li", {}, t, " ", el("button", {class: "ghost", onclick: () => { tab = to; render(); }}, "Bijwerken →"))))
+    : el("div", {class: "muted"}, "Alles is up-to-date."));
+  v.append(c);
+  const live = S.assets.filter(a => a.live_priced).map(a => a.name);
+  if (live.length) v.append(el("div", {class: "card"}, el("h2", {}, "Gaat vanzelf"), el("div", {class: "sub"},
+    `${live.join(", ")}: waarde uit je posities × live koersen. Nieuwe aankopen of verkopen? Importeer je brokerexport onder Bestanden.`)));
+}
+
+function vSavings(v) {
+  const c = el("div", {class: "card"}, el("h2", {}, "Spaarrekeningen"), el("div", {class: "sub"}, "Je bank deelt ze niet: geef het saldo van je bankapp in. Tussendoor schat centen het saldo uit je overschrijvingen (zonder interest)."));
+  const rows = S.savings.map(s => {
+    const a = amt("nieuw saldo"), d = dt(), b = el("button", {class: "go"}, "Opslaan");
+    b.addEventListener("click", () => post("savings_balance", {account: s.account || s.name, amount: a.value, date: d.value}, b, `${s.name} bijgewerkt`));
+    return el("tr", {}, el("td", {}, s.name, el("div", {class: "muted small"}, `${s.bank || ""} ${s.account || ""}`)),
+      el("td", {class: "num"}, eur(s.estimated_balance)),
+      el("td", {class: "num"}, s.balance_entered ? `${eur(s.balance_entered.amount)} · ${dL(s.balance_entered.date)}` : "—"),
+      el("td", {}, el("div", {class: "row"}, a, d, b)));
+  });
+  c.append(rows.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Rekening"), el("th", {class: "num"}, "Nu (geschat)"), el("th", {class: "num"}, "Laatst ingegeven"), el("th", {}, "Nieuw saldo"))), el("tbody", {}, rows))
+    : el("div", {class: "muted"}, "Geen spaarrekeningen: voeg ze toe via Claude (add_manual_account)."));
+  v.append(c);
+}
+
+function vAssets(v) {
+  const list = S.assets.filter(a => !["loan", "property"].includes(a.type));
+  const c = el("div", {class: "card"}, el("h2", {}, "Beleggingen, pensioen en andere"), el("div", {class: "sub"}, "Waarde van je jaaroverzicht, de app van je verzekeraar of je broker. Rekeningen met live koersen hoef je niet bij te werken."));
+  const rows = list.map(a => {
+    const val = amt("waarde"), d = dt(), b = el("button", {class: "go"}, "Opslaan");
+    b.addEventListener("click", () => post("asset_value", {account: a.name, value: val.value, date: d.value}, b, `${a.name} bijgewerkt`));
+    const ci = amt("inleg"), cd = dt(), cb = el("button", {class: "ghost"}, "Inleg opslaan");
+    cb.addEventListener("click", () => post("contributions", {account: a.name, amount: ci.value, date: cd.value}, cb, `Inleg ${a.name} bijgewerkt`));
+    const more = el("div", {class: "row", style: "margin-top:6px", hidden: true}, el("span", {class: "muted small"}, "Totale inleg tot"), cd, ci, cb);
+    const tog = el("button", {class: "ghost", onclick: () => { more.hidden = !more.hidden; }}, "inleg…");
+    return el("tr", {}, el("td", {}, a.name, el("span", {class: "chip"}, TYPE[a.type] || a.type), a.live_priced ? el("span", {class: "chip good"}, "live koersen") : null,
+        a.stale ? el("span", {class: "chip warn"}, `${a.days_since_value} d oud`) : null, el("div", {class: "muted small"}, a.provider || "")),
+      el("td", {class: "num"}, eur(a.value)), el("td", {class: "num"}, a.value_entered ? dL(a.value_entered.date) : "nooit"),
+      el("td", {class: "num"}, a.contributions == null ? "—" : eur(a.contributions)),
+      el("td", {}, el("div", {class: "row"}, val, d, b, tog), more));
+  });
+  c.append(el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Rekening"), el("th", {class: "num"}, "Waarde"), el("th", {class: "num"}, "Ingegeven"), el("th", {class: "num"}, "Inleg"), el("th", {}, "Nieuwe waarde"))), el("tbody", {}, rows)));
+  v.append(c);
+  if (S.missing_photo.length) {
+    const p = el("div", {class: "card"}, el("h2", {}, "Koers op 31/12/2025 (fotomoment)"), el("div", {class: "sub"}, "Voor de meerwaardebelasting: de slotkoers per stuk in EUR, van het jaaroverzicht van je broker."));
+    p.append(el("table", {}, el("tbody", {}, S.missing_photo.map(m => {
+      const a = amt("koers"), b = el("button", {class: "go"}, "Opslaan");
+      b.addEventListener("click", () => post("reference_price", {instrument: m.key, price: a.value}, b));
+      return el("tr", {}, el("td", {}, m.instrument, el("div", {class: "muted small"}, `${m.key} · ${m.account}`)), el("td", {}, el("div", {class: "row"}, a, b)));
+    }))));
+    v.append(p);
+  }
+}
+
+function vHome(v) {
+  const props = S.assets.filter(a => a.type === "property"), loans = S.assets.filter(a => a.type === "loan");
+  const g = el("div", {class: "grid2"});
+  const pc = el("div", {class: "card"}, el("h2", {}, "Woning"), el("div", {class: "sub"}, "Jouw schatting van de waarde (bv. na een schatting of vergelijkbare verkopen in de buurt)."));
+  for (const a of props) {
+    const val = amt("waarde"), d = dt(), b = el("button", {class: "go"}, "Opslaan");
+    b.addEventListener("click", () => post("asset_value", {account: a.name, value: val.value, date: d.value}, b, `${a.name} bijgewerkt`));
+    pc.append(el("div", {style: "margin:8px 0"}, el("b", {}, a.name), ` · ${eur(a.value)} sinds ${a.value_entered ? dL(a.value_entered.date) : "—"}`), el("div", {class: "row"}, val, d, b));
+  }
+  if (!props.length) pc.append(el("div", {class: "muted"}, "Nog geen woning: voeg ze toe onder Nieuwe rekening (soort Vastgoed)."));
+  g.append(pc);
+  const lc = el("div", {class: "card"}, el("h2", {}, "Leningen"), el("div", {class: "sub"}, "Het openstaande saldo daalt vanzelf met elke afbetaling. Nieuw leningsoverzicht of extra afgelost? Geef het saldo op die datum in."));
+  for (const a of loans) {
+    const pl = a.plan, val = amt("openstaand"), d = dt(), b = el("button", {class: "go"}, "Opslaan");
+    b.addEventListener("click", () => post("loan_statement", {account: a.name, outstanding: val.value, date: d.value}, b, `${a.name} bijgewerkt`));
+    lc.append(el("div", {style: "margin:10px 0 4px"}, el("b", {}, a.name), pl ? ` · nog ${eur(pl.outstanding_now)} · ${pl.payments_left} afbetalingen van ${eur(pl.instalment)} · overzicht van ${dL(pl.statement.date)}` : " · geen aflossingsplan (vraag Claude: set_loan_terms)"),
+      pl ? el("div", {class: "row"}, val, d, b) : null);
+  }
+  if (!loans.length) lc.append(el("div", {class: "muted"}, "Geen leningen."));
+  g.append(lc);
+  v.append(g);
+}
+
+function vLabel(v) {
+  const q = S.review[scope];
+  const sw = el("div", {class: "row", style: "margin-bottom:10px"}, ...[["personal", "Privé"], ["business", "BV"]].map(([k, n]) =>
+    el("button", {class: k === scope ? "go" : "ghost", onclick: () => { scope = k; render(); }}, n)));
+  const c = el("div", {class: "card"}, el("h2", {}, "Nog te labelen"), el("div", {class: "sub"},
+    `${q.transactions} betalingen onder ‘Overige’ sinds 1/1/${+S.today.slice(0, 4) - 1}. Opslaan maakt een regel: ook toekomstige betalingen krijgen die categorie.`), sw);
+  const rows = q.items.map(r => {
+    const s = el("select", {"aria-label": "categorie"}, el("option", {value: ""}, "— kies —"), S.categories.map(x => el("option", {value: x}, cat(x))));
+    if (r.suggestion && r.suggestion.category) s.value = r.suggestion.category;
+    const b = el("button", {class: "go"}, "Opslaan");
+    b.addEventListener("click", () => { if (!s.value) return toast("Kies eerst een categorie", true);
+      post("label", {merchant: r.merchant, category: s.value, scope}, b, `${r.merchant} → ${cat(s.value)}`); });
+    return el("tr", {}, el("td", {}, r.merchant, el("div", {class: "muted small"}, r.example || "")), el("td", {class: "num"}, `${r.count}×`),
+      el("td", {class: "num"}, eur(r.total)), el("td", {class: "muted small"}, r.suggestion ? r.suggestion.reason : ""), el("td", {}, el("div", {class: "row"}, s, b)));
+  });
+  c.append(rows.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Handelaar"), el("th", {class: "num"}, "Aantal"), el("th", {class: "num"}, "Bedrag"), el("th", {}, "Voorstel"), el("th", {}, "Categorie"))), el("tbody", {}, rows))
+    : el("div", {class: "muted"}, "Alles gelabeld."));
+  v.append(c);
+}
+
+function vImport(v) {
+  const g = el("div", {class: "grid2"});
+  const mk = (kind, title, sub) => {
+    const c = el("div", {class: "card"}, el("h2", {}, title), el("div", {class: "sub"}, sub));
+    let sel = null;
+    if (kind === "broker") { sel = el("select", {"aria-label": "rekening"}, S.broker_accounts.map(n => el("option", {value: n}, n))); c.append(el("div", {class: "row", style: "margin-bottom:8px"}, el("span", {class: "muted small"}, "Rekening"), sel)); }
+    const inp = el("input", {type: "file", multiple: true, accept: ".csv,.txt,.pdf,.xml,.cod,.coda", hidden: true});
+    const drop = el("div", {class: "drop"}, "Sleep bestanden hierheen of ", el("button", {class: "ghost", onclick: () => inp.click()}, "kies bestanden"));
+    const out = el("div", {class: "small", style: "margin-top:8px"});
+    const send = async files => {
+      for (const f of files) {
+        out.append(el("div", {}, `${f.name}: bezig…`));
+        try {
+          const q = new URLSearchParams({kind, name: f.name}); if (sel) q.set("account", sel.value);
+          const r = await fetch("/api/upload?" + q, {method: "POST", headers: {"X-Centen-Key": KEY}, body: await f.arrayBuffer()});
+          const j = await r.json(); if (!r.ok) throw new Error(j.error);
+          const res = j.result.result, files_ = res.files || [];
+          const n = kind === "broker" ? files_.map(x => x.error ? x.error : `${x.new ?? x.added ?? x.new_transactions ?? 0} nieuw`).join(", ") : `${res.new_transactions} nieuwe transacties`;
+          out.lastChild.textContent = `${f.name}: ${n}`;
+        } catch (e) { out.lastChild.textContent = `${f.name}: ${e.message}`; out.lastChild.style.color = "var(--bad)"; }
+      }
+      toast("Import klaar"); load();
+    };
+    inp.addEventListener("change", () => send([...inp.files]));
+    drop.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+    drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+    drop.addEventListener("drop", e => { e.preventDefault(); drop.classList.remove("over"); send([...e.dataTransfer.files]); });
+    c.append(drop, inp, out);
+    return c;
+  };
+  g.append(mk("broker", "Brokerexport", "DEGIRO (Transactions, Account, Portfolio — CSV of PDF), LYNX/IBKR-statement, Bitvavo-historiek. Al ingelezen rijen worden overgeslagen."),
+    mk("bank", "Oudere bankhistoriek", "CSV, CAMT.053 (XML) of CODA van je bank, bv. KBC vóór augustus 2026. Wat de bankkoppeling al heeft, blijft onaangeroerd."));
+  v.append(g, el("div", {class: "muted small"}, `Bestanden worden bewaard in ${S.imports_folder}\\uploads.`));
+}
+
+function vTargets(v) {
+  const DIMS = {class: "Soort (etf, equity, bond, crypto, cash…)", region: "Regio", currency: "Noteringsmunt", account: "Rekening"};
+  const cur = S.targets[dim] || {};
+  const c = el("div", {class: "card"}, el("h2", {}, "Doelverdeling"), el("div", {class: "sub"}, "Percentages die samen 100 maken. Het dashboard toont dan de afwijking en wat je moet bijkopen of verkopen."));
+  const sel = el("select", {onchange: e => { dim = e.target.value; render(); }}, Object.entries(DIMS).map(([k, n]) => el("option", {value: k}, n))); sel.value = dim;
+  const rows = el("tbody");
+  const addRow = (b = "", t = "") => { const bi = el("input", {placeholder: "groep, bv. etf", value: b}), ti = el("input", {class: "amt", placeholder: "%", value: t});
+    rows.append(el("tr", {}, el("td", {}, bi), el("td", {}, ti))); };
+  for (const [b, t] of Object.entries(cur)) addRow(b, Math.round(t * 1000) / 10);
+  if (!Object.keys(cur).length) { addRow(); addRow(); addRow(); }
+  const plus = el("button", {class: "ghost", onclick: () => addRow()}, "+ rij");
+  const save = el("button", {class: "go"}, "Opslaan");
+  save.addEventListener("click", () => { const t = {}; for (const tr of rows.children) { const [b, p] = tr.querySelectorAll("input"); if (b.value.trim()) t[b.value.trim()] = p.value; }
+    post("targets", {dimension: dim, targets: t}, save); });
+  c.append(el("div", {class: "row", style: "margin-bottom:8px"}, sel), el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Groep"), el("th", {}, "Doel %"))), rows),
+    el("div", {class: "row", style: "margin-top:8px"}, plus, save));
+  v.append(c);
+}
+
+function vNew(v) {
+  const c = el("div", {class: "card"}, el("h2", {}, "Nieuwe rekening"), el("div", {class: "sub"}, "Een pensioen- of verzekeringscontract, beleggingsrekening, vastgoed, lening of iets anders dat je bank niet deelt."));
+  const name = el("input", {placeholder: "naam, bv. Pensioensparen Argenta"}), type = el("select", {}, Object.entries(TYPE).map(([k, n]) => el("option", {value: k}, n)));
+  const prov = el("input", {placeholder: "bij (optioneel)"}), val = amt("waarde"), d = dt(), match = el("input", {placeholder: "herkennen aan tekst (optioneel), bv. dossiernummer"});
+  const sc = el("select", {}, el("option", {value: "personal"}, "privé"), el("option", {value: "business"}, "BV"));
+  const b = el("button", {class: "go"}, "Toevoegen");
+  b.addEventListener("click", () => post("add_asset", {name: name.value, type: type.value, provider: prov.value, value: val.value, date: d.value, scope: sc.value, match: match.value}, b, `${name.value} toegevoegd`));
+  c.append(el("div", {class: "row"}, name, type, prov, sc), el("div", {class: "row", style: "margin-top:8px"}, val, d, match, b));
+  v.append(c);
+}
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+Timezone,Date,Time,Type,Currency,Amount,Quote Currency,Quote Price,Received / Paid Currency,Received / Paid Amount,Fee currency,Fee amount,Status,Transaction ID,Address
+Europe/Brussels,2024-12-06,10:15:00,deposit,EUR,9000,,,,,EUR,0,Completed,t1,
+Europe/Brussels,2024-12-06,10:20:00,buy,BTC,0.1,EUR,90000,EUR,-9000,EUR,22.5,Completed,t2,
+Europe/Brussels,2025-01-07,11:00:00,sell,BTC,-0.05,EUR,95000,EUR,4750,EUR,11.88,Completed,t3,
+Europe/Brussels,2025-01-08,11:00:00,withdrawal,EUR,-4738.12,,,,,EUR,0,Completed,t4,
+Europe/Brussels,2025-02-01,09:00:00,staking,ETH,0.01,EUR,3000,,,,,Completed,t5,
+Europe/Brussels,2025-03-01,09:00:00,withdrawal,BTC,-0.02,,,,,BTC,0.00001,Completed,t6,bc1qxyz
+Europe/Brussels,2025-03-02,09:00:00,buy,ETH,1,EUR,2500,EUR,-2500,EUR,6.25,Canceled,t7,

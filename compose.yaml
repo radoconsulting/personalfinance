@@ -1,0 +1,17 @@
+# centen on a NAS / home server.  Synology: Container Manager > Project > Create, point it at this folder.
+# Everything lives in ./data (database, config.json, Enable Banking key, dashboard). Back that folder up.
+services:
+  centen:
+    image: ghcr.io/radoconsulting/centen:latest   # or build it yourself: comment this line, uncomment `build: .`
+    # build: .
+    container_name: centen
+    restart: unless-stopped
+    ports:
+      - "8770:8770"             # http://<nas>:8770 — keep it on your home network or VPN
+    volumes:
+      - ./data:/data
+      - ./imports:/imports       # optional: drop broker / bank exports here
+    environment:
+      TZ: Europe/Brussels
+      CENTEN_KEY: ${CENTEN_KEY:?set CENTEN_KEY in .env}   # access key for the web pages and for Claude
+    user: "${PUID:-1000}:${PGID:-1000}"
