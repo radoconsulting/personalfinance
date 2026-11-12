@@ -52,7 +52,7 @@ def relay(url: str, key: str, stdin=None, stdout=None, client: httpx.Client | No
             answers = _sse_messages(r.text) if "event-stream" in ctype else [r.json()]
             for a in answers:
                 for x in (a if isinstance(a, list) else [a]):
-                    stdout.write(json.dumps(x, ensure_ascii=False) + "\n")
+                    stdout.write(json.dumps(x, ensure_ascii=True) + "\n")
             stdout.flush()
         except Exception as e:  # noqa: BLE001 - answer every request, also when the server can't be reached
             for m in msgs:
@@ -63,6 +63,12 @@ def relay(url: str, key: str, stdin=None, stdout=None, client: httpx.Client | No
 
 
 def main(url: str, key: str | None = None) -> None:
+    # Windows starts this with a cp1252 console encoding; JSON-RPC over stdio is UTF-8.
+    for stream in (sys.stdin, sys.stdout):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except (AttributeError, ValueError):
+            pass
     key = key or os.environ.get("CENTEN_KEY")
     if not key:
         sys.exit("Set CENTEN_KEY (the server's access key) or pass --key.")

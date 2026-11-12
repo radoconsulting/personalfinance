@@ -79,3 +79,17 @@ def test_nav_is_themed_and_marks_current_page():
     assert '[data-theme="dark"] .centen-nav' in html and "prefers-color-scheme: dark" in html
     assert 'href="/bijwerken" aria-current="page"' in html
     assert 'href="/" aria-current' not in html and "__A_" not in html
+
+
+def test_remote_relay_output_survives_a_cp1252_console():
+    import io
+    import httpx
+    from centen import remote
+    def handler(request):
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {"t": "− 0,13% €"}})
+    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    remote.relay("http://x/mcp", "k", stdin=io.StringIO('{"jsonrpc":"2.0","id":1,"method":"ping"}\n'), stdout=out,
+                 client=httpx.Client(transport=httpx.MockTransport(handler)))
+    out.seek(0)
+    import json
+    assert json.loads(out.read())["result"]["t"] == "− 0,13% €"
