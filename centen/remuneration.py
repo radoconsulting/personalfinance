@@ -146,8 +146,9 @@ def scenario(profit: float, remuneration: float, p: dict) -> dict:
     cit = corporate_tax(left, remuneration)
     after = left - cit
     dist = distribution(after, p["vvprbis"])
-    best_now = max((k for k in dist if k not in ("keep", "liquidation_reserve_at_liquidation")),
-                   key=lambda k: dist[k])
+    # On a tie prefer money you can take out now: VVPRbis, then the liquidation reserve (3 years' wait), then ordinary.
+    order = {"vvprbis": 0, "liquidation_reserve": 1, "ordinary": 2}
+    best_now = max((k for k in dist if k in order), key=lambda k: (round(dist[k], 0), -order[k]))
     total = rem["net"] + dist[best_now]
     return {"remuneration": r2(remuneration), "remuneration_net": rem["net"], "social": rem["social"],
             "income_tax": rem["tax"], "profit_after_remuneration": r2(left), "corporate_tax": r2(cit),
