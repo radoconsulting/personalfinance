@@ -835,6 +835,7 @@ def position(conn, date_from: date | None = None, date_to: date | None = None, t
                                                      "paid_since_value", "stale")} for a in asum["loans"]],
         "net_worth": {"total": net_worth, "cash": cash.get("net_cash"), "investments": at["investments_value"],
                       "brokers_not_added": at["not_added_net_deposited"], "property": at["property"],
+                      "possessions": at.get("possessions"),
                       "loans": r2(-(at["loans_outstanding"] or 0)), "by_scope": {
                           s_: r2((cash.get(s_) or 0) + (at["by_scope"].get(s_) or 0)
                                  - sum(a.get("outstanding") or 0 for a in asum["loans"] if a["scope"] == s_))

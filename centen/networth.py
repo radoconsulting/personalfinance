@@ -52,7 +52,7 @@ def snapshot(conn, today: date | None = None, position: dict | None = None) -> d
     nw, cash = position["net_worth"], position["cash"]
     row = {"date": today.isoformat(), "source": "live", "cash_personal": r2(cash.get("personal")),
            "cash_business": r2(cash.get("business")), "investments": r2(nw.get("investments")),
-           "property": r2(nw.get("property")), "loans": r2(abs(nw.get("loans") or 0)), "total": r2(nw.get("total"))}
+           "property": r2((nw.get("property") or 0) + (nw.get("possessions") or 0)), "loans": r2(abs(nw.get("loans") or 0)), "total": r2(nw.get("total"))}
     conn.execute("INSERT OR REPLACE INTO networth_snapshots(date, source, cash_personal, cash_business, investments, "
                  "property, loans, total, parts_json) VALUES (?,?,?,?,?,?,?,?,?)",
                  (*row.values(), json.dumps(nw, default=str)))
@@ -263,13 +263,13 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
                 other["property"][e] += abs(vals[0][1])
                 home_back[a["name"]] = vals[0][0][:10]
                 continue
-            if typ in ("property", "loan"):
+            if typ in ("property", "loan", "asset"):  # possessions (a car, a watch) go with the home (r19)
                 if not vals or e < date.fromisoformat(vals[0][0][:10]):
                     continue
                 v = AS._value_at(a, vals, fl, e)
                 if v is None:
                     continue
-                other["property" if typ == "property" else "loans"][e] += abs(v)
+                other["loans" if typ == "loan" else "property"][e] += abs(v)
                 continue
             first_val = date.fromisoformat(vals[0][0][:10]) if vals else None
             if first_val and e >= first_val:

@@ -663,9 +663,9 @@ def cmd_demo(a):
             sys.exit(f"{path} exists; use --force to regenerate.")
         for suffix in ("", "-wal", "-shm"):
             Path(str(path) + suffix).unlink(missing_ok=True)
-    from .demo import generate
+    from .demo import generate, generate_full
     with closing(db.connect(path)) as conn:
-        res = generate(conn)
+        res = generate_full(conn) if getattr(a, "full", False) else generate(conn)
     print(f"Demo data written to {path}: {res['transactions']} transactions, {res['from']} → {res['to']}.")
     print(f"Try it in Claude by setting CENTEN_DB={path} in the MCP server's env (see README).")
 
@@ -842,6 +842,7 @@ def build_parser():
 
     s = sub.add_parser("demo", help="Create a demo database (fictional Belgian household) at --db or ~/.centen/demo.db")
     s.add_argument("--force", action="store_true")
+    s.add_argument("--full", action="store_true", help="also a company, investments, home, mortgage, car")
     s.set_defaults(func=cmd_demo)
 
 

@@ -211,7 +211,7 @@ def test_dashboard_has_r18_sections(demo_conn, tmp_path):
     depreciation.add_vehicle(demo_conn, "Spyder", 139000, "2026-07-16", 5, today=TODAY)
     p = dashboard.build(demo_conn, tmp_path / "d.html", TODAY)
     html = p.read_text(encoding="utf-8")
-    assert "Verloning of dividend?" in html and "Extra aflossen of beleggen?" in html and "Wat aan waarde verliest" in html
+    assert "Verloning of dividend?" in html and "Extra aflossen of beleggen?" in html
     data = dashboard._extras(demo_conn, TODAY)
     assert data["vehicles"][0]["name"] == "Spyder"
     assert "error" not in (data["prepay"] or {})
@@ -235,3 +235,25 @@ def test_money_back_in_a_spending_category_is_a_one_off_too(demo_conn):
     assert planner.inputs(demo_conn, TODAY)["one_offs_added_back_monthly"] == pytest.approx(39000 / 12, abs=1)
     big = {x["id"]: x for x in app.state(demo_conn, TODAY)["pension"]["big_expenses"]}
     assert big["sell"]["amount"] == -100000.0 and big["sell"]["state"] == "auto"
+
+
+# --- r19: possessions -----------------------------------------------------------------------------------------
+
+def test_possessions_are_not_investments_but_count_in_net_worth(demo_conn):
+    from centen import analytics as A, possessions
+    assets.add_account(demo_conn, "Broker", "investment", value=50000, value_date="2026-11-01", today=TODAY)
+    before = A.position(demo_conn, today=TODAY)["net_worth"]["total"]
+    inv_before = assets.summary(demo_conn, TODAY)["totals"]["investments_value"]
+    assets.add_account(demo_conn, "Rolex Submariner", "asset", value=9500, value_date="2025-03-01", today=TODAY)
+    depreciation.add_vehicle(demo_conn, "Porsche 718", 139000, "2026-07-16", 0, today=TODAY)
+    T = assets.summary(demo_conn, TODAY)["totals"]
+    assert T["investments_value"] == inv_before and T["possessions"] == pytest.approx(148500, abs=1)
+    after = A.position(demo_conn, today=TODAY)["net_worth"]
+    assert after["total"] == pytest.approx(before + 148500, abs=1) and after["possessions"] == pytest.approx(148500, abs=1)
+    o = possessions.overview(demo_conn, TODAY)
+    kinds = {i["name"]: i["kind"] for i in o["items"]}
+    assert kinds == {"Porsche 718": "Wagen", "Rolex Submariner": "Horloge & juwelen"}
+    car = next(i for i in o["items"] if i["name"] == "Porsche 718")
+    assert car["cost"] == 139000 and car["cost_basis"] == "aankoopprijs" and car["change"] == pytest.approx(0, abs=0.5)
+    assert o["total"] == pytest.approx(148500, abs=1) and 0 < o["share_of_net_worth"] < 1
+    assert "Wagen" in o["running_costs_12m"]

@@ -86,6 +86,8 @@ to the pension date), `scenario_plan` (wealth projection and financial independe
 `phone_notifications` (ntfy push to the phone). Dashboard tabs: "Vaste kosten", "Prognose", "Pensioen", "Planner".
 r18: `remuneration_vs_dividend` + `set_tax_profile`, `add_vehicle` / `set_depreciation` (a car at a depreciating value
 in the net worth), `loan_prepayment` (pay off or invest), `import_pension_statement` (read the insurer's pension fiche).
+r19: `possessions` (home, cars, watches: value, purchase price, change, running costs). 'asset' accounts are possessions:
+they count in the net worth but not in the investments' value or return. Dashboard tab "Bezittingen".
 
 How to help:
 - Answer in the user's language (often Dutch or French) and in everyday words. Explain Belgian banking terms when
@@ -1136,6 +1138,21 @@ def import_pension_statement(path: str, account: Optional[str] = None, apply: bo
     if not os.path.exists(p):
         return _out({"error": f"File not found: {path}"})
     return _edit_call(lambda c: pension.import_statement(c, p, account, apply, today=_today()), refresh=apply)
+
+
+@_tool(READ)
+def possessions() -> str:
+    """Possessions that aren't investments: the home and other 'asset' accounts (cars, watches, art). Per item the
+    value now, the purchase price (or first value entered), the change since, depreciation if any, value history,
+    share of net worth; the home's equity after its loans; and what a car and the home cost over the last 12 months
+    (fuel, maintenance, energy…, without buying or selling the thing itself). Add one with add_asset_account
+    (asset_type='asset') or add_vehicle (with depreciation)."""
+    from . import possessions as PO
+    with _conn() as c:
+        res = PO.overview(c, _today())
+    for i in res["items"]:
+        i["history"] = i["history"][-13:]
+    return _out(res)
 
 
 # --- prompts (show up as slash commands in Claude Desktop) ---------------------------

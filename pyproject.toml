@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "centen"
-version = "0.18.3"
+version = "0.19.0"
 description = "Personal Finance for Claude, for Belgian bank accounts: local MCP server with PSD2 sync (Enable Banking) and CSV/CAMT.053 import."
 readme = "README.md"
 requires-python = ">=3.10"

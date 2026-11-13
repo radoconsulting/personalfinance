@@ -327,6 +327,16 @@ history). Every change goes into the same database and rebuilds the dashboard.
 - **Pensioen in de bijwerk-app**: birth date, pension age, stop-working age, legal pension, spending and investing
   (empty = from history), and per large expense whether it counts.
 
+## r19: possessions and a tidier dashboard
+
+- **Bezittingen** (tab, tool `possessions`): the home and other valuable things (cars, watches, art) with the value
+  now, what they cost, the change, the value history, their share of your net worth, the equity in the home and what
+  a car and the home cost per year. "Other asset" accounts are possessions: they count in the net worth, not in the
+  investments' value or return.
+- Dashboard: tabs grouped (overview · money in and out · what you own · the future · the rest), Gezin folded into
+  Privé, "Waar zit je vermogen" on the Totaal tab, empty investment analyses replaced by one hint, the open tab kept in
+  view on a phone. `centen demo --full` builds a demo with a company, investments, a home, a car and a watch.
+
 ## Categories and your own rules
 
 `centen categories` lists them. Fix things from the CLI or by asking Claude:

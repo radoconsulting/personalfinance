@@ -194,3 +194,91 @@ def generate(conn, today: date | None = None, months: int = 15, seed: int = 7) -
     n = db.insert_transactions(conn, enriched)
     conn.commit()
     return {"accounts": len(accounts), "transactions": n, "from": start.isoformat(), "to": today.isoformat()}
+
+
+def generate_full(conn, today: date | None = None, months: int = 15) -> dict:
+    """The demo household plus a one-person company, investments, a pension contract, the home with its mortgage,
+    a car and a watch: every dashboard tab has something to show."""
+    from . import assets, depreciation, loans, pension, remuneration
+    today = today or date.today()
+    res = generate(conn, today, months)
+    start = date.fromisoformat(res["from"])
+    rnd = random.Random(11)
+    bv_iban, zicht = make_iban("735", 3141592), make_iban("734", 1234567)
+    bv = f"acc:{bv_iban}"
+    db.upsert_account(conn, id=bv, source="demo", bank="Bank Van Breda", name="Demo Consulting BV", iban=bv_iban,
+                      account_type="current")
+    conn.execute("UPDATE accounts SET scope='business' WHERE id=?", (bv,))
+    conn.commit()
+    ctx = Context.from_db(conn)
+    Z = f"acc:{zicht}"
+    txs, seq = [], [0]
+
+    def add(acc, d, amount, cp=None, cp_iban=None, desc=None, msg=None):
+        if d > today or d < start:
+            return
+        seq[0] += 1
+        txs.append(dict(id=db.make_id("demofull", seq[0]), account_id=acc, booking_date=d.isoformat(),
+                        value_date=d.isoformat(), amount=round(amount, 2), currency="EUR", status="booked",
+                        counterparty_name=cp, counterparty_iban=cp_iban, description=desc, remittance=msg,
+                        source="demo"))
+
+    fod = make_iban("679", 2005502)
+    d = start
+    while d <= today:
+        y, m = d.year, d.month
+        inv = 15000 + rnd.choice([0, 0, 750, -750])
+        add(bv, date(y, m, 10), inv * 1.21, "CLIENT BELGIUM NV", make_iban("001", 5550001), "EUROPESE OVERSCHRIJVING VAN",
+            f"Factuur {y}{m:02d}01")
+        add(bv, date(y, m, 26), -2900.0, "Demo Gebruiker", zicht, "EUROPESE OVERSCHRIJVING NAAR", f"Verloning {m:02d}/{y}")
+        add(Z, date(y, m, 26), 2900.0, "Demo Consulting BV", bv_iban, "EUROPESE OVERSCHRIJVING VAN", f"Verloning {m:02d}/{y}")
+        add(bv, date(y, m, 5), -1020.0, "SD WORX", make_iban("310", 4440004), "EUROPESE DOMICILIERING",
+            "Sociaal secretariaat en sociale bijdragen")
+        add(bv, date(y, m, 18), -rnd.uniform(150, 600), "DIVERSE LEVERANCIERS", None, "BETALING", "Kantoor en software")
+        if m in (1, 4, 7, 10):
+            add(bv, date(y, m, 20), -rnd.uniform(7800, 9600), "FOD FINANCIEN", fod, "EUROPESE OVERSCHRIJVING NAAR",
+                "BTW-aangifte kwartaal")
+            add(bv, date(y, m, 12), -650.0, "BOEKHOUDKANTOOR VERHULST BV", make_iban("068", 7770007),
+                "EUROPESE OVERSCHRIJVING NAAR", "Boekhouding kwartaal")
+        if m in (4, 7, 10, 12):
+            add(bv, date(y, m, 10), -3500.0, "FOD FINANCIEN", fod, "EUROPESE OVERSCHRIJVING NAAR", "Voorafbetaling vennootschapsbelasting")
+        if m == 6:
+            add(bv, date(y, 6, 15), -17000.0, "Demo Gebruiker", zicht, "EUROPESE OVERSCHRIJVING NAAR", "Uitkering dividend boekjaar")
+            add(Z, date(y, 6, 15), 17000.0, "Demo Consulting BV", bv_iban, "EUROPESE OVERSCHRIJVING VAN", "Uitkering dividend boekjaar")
+            add(bv, date(y, 6, 15), -3000.0, "FOD FINANCIEN", fod, "EUROPESE OVERSCHRIJVING NAAR", "Roerende voorheffing dividend")
+        add(Z, date(y, m, 2), -1000.0, "flatexDEGIRO Bank AG", "DE00101308000000123456", "EUROPESE OVERSCHRIJVING NAAR",
+            "Storting beleggingsrekening")
+        d = date(y + (m == 12), m % 12 + 1, 1)
+    sold, bought = today - timedelta(days=250), today - timedelta(days=245)
+    add(Z, sold, 18000.0, "GARAGE DE SMET BV", make_iban("737", 6660006), "EUROPESE OVERSCHRIJVING VAN", "Overname wagen 1-ABC-123")
+    add(Z, bought, -45000.0, "D'IETEREN AUTO NV", make_iban("310", 6660007), "EUROPESE OVERSCHRIJVING NAAR", "Aankoop Volkswagen ID.4")
+
+    flows = {}
+    for t in txs:
+        flows[t["account_id"]] = flows.get(t["account_id"], 0.0) + t["amount"]
+    db.set_balance(conn, bv, today.isoformat(), "booked", round(25000 + flows.get(bv, 0.0), 2))
+    zb = conn.execute("SELECT amount FROM balances WHERE account_id=? AND balance_type='booked'", (Z,)).fetchone()[0]
+    db.set_balance(conn, Z, today.isoformat(), "booked", round(zb + flows.get(Z, 0.0) + 30000, 2))
+    db.set_balance(conn, Z, today.isoformat(), "available", round(zb + flows.get(Z, 0.0) + 30000, 2))
+    db.insert_transactions(conn, [enrich(t, ctx) for t in txs])
+    conn.commit()
+    from .categorize import recategorize
+    recategorize(conn)
+
+    assets.add_account(conn, "DEGIRO", "investment", value=85000, value_date=today.isoformat(), today=today)
+    assets.add_account(conn, "Groepsverzekering IPT", "pension", value=42000, value_date=(today - timedelta(days=200)).isoformat(),
+                       provider="AG Insurance", today=today)
+    assets.add_account(conn, "Eigen woning", "property", value=420000, value_date=(today - timedelta(days=300)).isoformat(),
+                       today=today)
+    assets.add_account(conn, "Woonkrediet KBC", "loan", value=180000, value_date=(today - timedelta(days=40)).isoformat(),
+                       provider="KBC", today=today)
+    loans.set_terms(conn, "Woonkrediet KBC", 180000, (today.replace(year=today.year + 17)).isoformat(), 0.0015,
+                    principal=240000, contract_date=(today.replace(year=today.year - 8)).isoformat(),
+                    statement_date=(today - timedelta(days=40)).isoformat(), today=today)
+    depreciation.add_vehicle(conn, "Volkswagen ID.4", 45000, bought.isoformat(), 15, today=today)
+    assets.add_account(conn, "Rolex Submariner", "asset", value=9500, value_date=(today - timedelta(days=600)).isoformat(),
+                       today=today)
+    pension.set_profile(conn, birth_date="1987-04-12", legal_pension_monthly=1850)
+    remuneration.set_profile(conn, municipal_rate=7.0, children=1)
+    res["full"] = True
+    return res

@@ -566,12 +566,15 @@ def latest_positions(conn) -> list[dict]:
 def summary(conn, today: date | None = None) -> dict:
     today = _today(today)
     accounts = list_accounts(conn, today)
-    inv = [a for a in accounts if a["type"] in INVESTING_ASSET_TYPES]
+    # "asset" (a car, a watch) is a possession, not an investment: it counts in the net worth, not in the
+    # investments' value and return (r19).
+    inv = [a for a in accounts if a["type"] in INVESTING_ASSET_TYPES and a["type"] != "asset"]
+    things = [a for a in accounts if a["type"] == "asset"]
     loans = [a for a in accounts if a["type"] == "loan"]
     prop = [a for a in accounts if a["type"] == "property"]
     un = unassigned(conn)
     by_type, by_scope = defaultdict(float), defaultdict(float)
-    for a in inv + prop:
+    for a in inv + prop + things:
         by_type[a["type"]] += counted_value(a)
         by_scope[a["scope"]] += counted_value(a)
     valued = [a for a in inv if a.get("value") is not None and a.get("contributions") is not None]
@@ -580,21 +583,23 @@ def summary(conn, today: date | None = None) -> dict:
     un_pos = sum(max(0.0, u["net_deposited"]) for u in un)
     for u in un:
         by_scope[u["scope"]] += max(0.0, u["net_deposited"])
-    values = [a for a in inv + prop + loans if a.get("value_entered")]
+    values = [a for a in inv + prop + things + loans if a.get("value_entered")]
     totals = {
         "investments_value": r2(sum(counted_value(a) for a in inv)),
         "investments_contributions": r2(sum(a["contributions"] or 0 for a in inv)),
         "gain_on_valued_accounts": r2(gain) if valued else None,
         "gain_pct": round(gain / contrib, 4) if valued and contrib > 0 else None,
         "property": r2(sum(counted_value(a) for a in prop)),
+        "possessions": r2(sum(counted_value(a) for a in things)),
         "loans_outstanding": r2(sum(a.get("outstanding") or 0 for a in loans)),
         "not_added_net_deposited": r2(un_pos),
         "by_type": {k: r2(v) for k, v in by_type.items()},
         "by_scope": {k: r2(v) for k, v in by_scope.items()},
         "oldest_value": min((a["value_entered"]["date"] for a in values), default=None),
-        "accounts_without_value": [a["name"] for a in inv + prop + loans if not a.get("value_entered")],
+        "accounts_without_value": [a["name"] for a in inv + prop + things + loans if not a.get("value_entered")],
     }
-    totals["assets_net"] = r2((totals["investments_value"] or 0) + (totals["property"] or 0) + un_pos
+    totals["assets_net"] = r2((totals["investments_value"] or 0) + (totals["property"] or 0)
+                              + (totals["possessions"] or 0) + un_pos
                               - (totals["loans_outstanding"] or 0))
     return {"accounts": [a for a in accounts if a["type"] != "loan"], "loans": loans, "not_added": un,
             "totals": totals}
