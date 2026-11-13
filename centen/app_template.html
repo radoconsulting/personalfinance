@@ -110,12 +110,12 @@ const dt = () => { const i = el("input", {class: "dt", type: "date", "aria-label
 const ageDays = d => d ? Math.round((new Date(S.today) - new Date(d)) / 864e5) : null;
 
 const TABS = [["todo", "Te doen"], ["savings", "Spaarrekeningen"], ["assets", "Beleggingen & pensioen"], ["home", "Woning & leningen"],
-  ["label", "Labelen"], ["import", "Bestanden"], ["targets", "Doelen"], ["new", "Nieuwe rekening"]];
+  ["pension", "Pensioen"], ["label", "Labelen"], ["import", "Bestanden"], ["targets", "Doelen"], ["new", "Nieuwe rekening"]];
 function render() {
   const nav = document.getElementById("tabs"); nav.textContent = "";
   for (const [id, name] of TABS) nav.append(el("button", {role: "tab", "aria-selected": String(id === tab), onclick: () => { tab = id; render(); }}, name));
   const v = document.getElementById("view"); v.textContent = "";
-  ({todo: vTodo, savings: vSavings, assets: vAssets, home: vHome, label: vLabel, import: vImport, targets: vTargets, new: vNew})[tab](v);
+  ({todo: vTodo, savings: vSavings, assets: vAssets, home: vHome, pension: vPension, label: vLabel, import: vImport, targets: vTargets, new: vNew})[tab](v);
 }
 
 function todoItems() {
@@ -211,6 +211,87 @@ function vHome(v) {
   if (!loans.length) lc.append(el("div", {class: "muted"}, "Geen leningen."));
   g.append(lc);
   v.append(g);
+}
+
+function vPension(v) {
+  const P = S.pension;
+  if (!P || P.error) { v.append(el("div", {class: "card"}, el("h2", {}, "Pensioen"), el("div", {class: "muted"}, P ? P.error : "Niet beschikbaar."))); return; }
+  const pr = P.profile;
+  const inp = (key, ph, val, kind) => { const i = el("input", {class: kind === "date" ? "dt" : "amt", type: kind === "date" ? "date" : "text", placeholder: ph, "aria-label": ph});
+    i.value = val == null ? "" : (kind === "date" ? val : String(val).replace(".", ",")); i.dataset.key = key; return i; };
+  const fields = [
+    inp("birth_date", "geboortedatum", pr.birth_date, "date"),
+    inp("retirement_age", "pensioenleeftijd", pr.retirement_age),
+    inp("stop_work_age", "leeftijd", pr.stop_work_age),
+    inp("legal_pension_monthly", "wettelijk pensioen / maand", pr.legal_pension_monthly),
+    inp("spending_monthly", "bedrag", pr.spending_monthly),
+    inp("investing_yearly", "bedrag", pr.investing_yearly),
+    inp("investing_years", "historiek over … jaar", pr.investing_years),
+    inp("one_off_threshold", "eenmalig vanaf (bedrag)", pr.one_off_threshold),
+  ];
+  const lab = ["Geboortedatum", "Pensioenleeftijd", ["Stoppen met werken op", "leeg = op je pensioenleeftijd"], ["Wettelijk pensioen per maand (bruto)", "raming van mypension.be"],
+    ["Uitgaven per maand", `leeg = uit je historiek: ${eur(P.spending_from_history)}`], ["Nieuwe inleg in beleggingen per jaar", `leeg = uit je historiek: ${eur(P.investing_from_history)}`],
+    "Gemiddelde over … jaar", "Eenmalige uitgave vanaf"];
+  const labCell = l => Array.isArray(l) ? el("td", {}, l[0], el("div", {class: "muted small"}, l[1])) : el("td", {}, l);
+  const save = el("button", {class: "go"}, "Opslaan");
+  save.addEventListener("click", () => { const body = {}; for (const f of fields) body[f.dataset.key] = f.value; post("pension_profile", body, save, "Pensioenprofiel bewaard"); });
+  const c = el("div", {class: "card"}, el("h2", {}, "Pensioenprofiel"), el("div", {class: "sub"}, "Laat een veld leeg om de waarde uit je historiek te gebruiken. Bedragen in euro van vandaag."));
+  c.append(el("table", {}, el("tbody", {}, fields.map((f, i) => el("tr", {}, labCell(lab[i]), el("td", {}, f))))), el("div", {class: "row", style: "margin-top:8px"}, save));
+  v.append(c);
+
+  const b = el("div", {class: "card"}, el("h2", {}, "Grote uitgaven van de laatste 12 maanden"), el("div", {class: "sub"},
+    `Eenmalige uitgaven tellen niet mee in je uitgavenprofiel. Vanaf ${eur(pr.one_off_threshold)} gebeurt dat automatisch; hier zet je het per betaling zelf.`));
+  const LBL = {auto: "eenmalig (automatisch)", manual: "eenmalig (door jou)", kept: "telt mee (door jou)", counted: "telt mee"};
+  b.append(P.big_expenses.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Datum"), el("th", {}, "Wat"), el("th", {class: "num"}, "Bedrag"), el("th", {}, "Nu"), el("th", {}, ""))),
+    el("tbody", {}, P.big_expenses.map(x => {
+      const one = x.state === "auto" || x.state === "manual";
+      const btn = el("button", {class: "ghost"}, one ? "Toch meetellen" : "Niet meetellen");
+      btn.addEventListener("click", () => post("one_off", {id: x.id, state: one ? (x.state === "auto" ? "in" : "auto") : "out"}, btn));
+      const reset = x.state === "manual" || x.state === "kept" ? el("button", {class: "ghost", onclick: e => post("one_off", {id: x.id, state: "auto"}, e.target)}, "automatisch") : null;
+      return el("tr", {}, el("td", {}, dL(x.date)), el("td", {}, x.merchant || "—", el("div", {class: "muted small"}, cat(x.category))), el("td", {class: "num"}, eur(x.amount)),
+        el("td", {}, el("span", {class: "chip" + (one ? " warn" : "")}, LBL[x.state])), el("td", {}, el("div", {class: "row"}, btn, reset)));
+    }))) : el("div", {class: "muted"}, "Geen uitgaven boven € 1.000."));
+  v.append(b);
+
+  const f = el("div", {class: "card"}, el("h2", {}, "Pensioenfiche inlezen"), el("div", {class: "sub"}, "De jaarlijkse fiche van je verzekeraar (PDF). centen zoekt de reserve, het verwachte kapitaal en de premie; je kijkt ze na voor je ze opslaat."));
+  const accSel = el("select", {"aria-label": "pensioenrekening"}, P.pension_accounts.map(n => el("option", {value: n}, n)));
+  const file = el("input", {type: "file", accept: ".pdf", hidden: true});
+  const out = el("div", {style: "margin-top:8px"});
+  const pick = el("button", {class: "ghost", onclick: () => file.click()}, "Kies de PDF");
+  file.addEventListener("change", async () => {
+    const fl = file.files[0]; if (!fl) return;
+    out.textContent = "Bezig…";
+    try {
+      const q = new URLSearchParams({kind: "pension", name: fl.name, account: accSel.value});
+      const r = await fetch("/api/upload?" + q, {method: "POST", headers: {"X-Centen-Key": KEY}, body: await fl.arrayBuffer()});
+      const j = await r.json(); if (!r.ok) throw new Error(j.error);
+      const fd = j.result.found || {};
+      out.textContent = "";
+      const res = inp("reserve", "reserve", fd.reserve ? fd.reserve.amount : ""), dd = inp("date", "datum", (fd.reserve && fd.reserve.date) || fd.statement_date || S.today, "date");
+      const ex = inp("expected", "verwacht kapitaal", fd.expected ? fd.expected.amount : ""), pm = inp("premium", "premie / jaar", fd.premium ? fd.premium.amount : "");
+      const ok = el("button", {class: "go"}, "Opslaan");
+      ok.addEventListener("click", () => post("pension_values", {account: accSel.value, reserve: res.value, date: dd.value, expected: ex.value, premium: pm.value}, ok, "Fiche verwerkt"));
+      const src = k => fd[k] ? el("div", {class: "muted small"}, "gevonden in: " + fd[k].line) : el("div", {class: "muted small"}, "niet gevonden: vul zelf in");
+      out.append(el("table", {}, el("tbody", {},
+        el("tr", {}, el("td", {}, "Reserve (waarde nu)"), el("td", {}, el("div", {class: "row"}, res, dd), src("reserve"))),
+        el("tr", {}, el("td", {}, `Verwacht kapitaal${fd.age ? " op " + fd.age + " jaar" : ""}`), el("td", {}, ex, src("expected"))),
+        el("tr", {}, el("td", {}, "Premie per jaar"), el("td", {}, pm, src("premium"))))), el("div", {class: "row", style: "margin-top:8px"}, ok));
+    } catch (e) { out.textContent = e.message; out.style.color = "var(--bad)"; }
+    file.value = "";
+  });
+  f.append(P.pension_accounts.length ? el("div", {class: "row"}, el("span", {class: "muted small"}, "Rekening"), accSel, pick, file) : el("div", {class: "muted"}, "Nog geen pensioenrekening: voeg ze toe onder Nieuwe rekening (soort Pensioen)."), out);
+  v.append(f);
+
+  const T = P.tax;
+  const mr = inp("municipal_rate", "gemeentebelasting %", T.municipal_rate != null ? Math.round(T.municipal_rate * 1000) / 10 : "");
+  const ch = inp("children", "kinderen ten laste", T.children);
+  const vv = el("input", {type: "checkbox"}); vv.checked = !!T.vvprbis;
+  const ts = el("button", {class: "go"}, "Opslaan");
+  ts.addEventListener("click", () => post("tax_profile", {municipal_rate: mr.value, children: ch.value, vvprbis: vv.checked}, ts, "Belastingprofiel bewaard"));
+  v.append(el("div", {class: "card"}, el("h2", {}, "Belastingprofiel"), el("div", {class: "sub"}, "Voor de vergelijking verloning of dividend (BV-tab in het dashboard)."),
+    el("table", {}, el("tbody", {}, el("tr", {}, el("td", {}, "Gemeentebelasting (%)"), el("td", {}, mr)), el("tr", {}, el("td", {}, "Kinderen ten laste"), el("td", {}, ch)),
+      el("tr", {}, el("td", {}, "VVPRbis-aandelen (inbreng in geld)"), el("td", {}, el("label", {class: "row"}, vv, el("span", {class: "muted small"}, "aanvinken als je BV daarvoor in aanmerking komt")))))),
+    el("div", {class: "row", style: "margin-top:8px"}, ts)));
 }
 
 function vLabel(v) {

@@ -311,6 +311,22 @@ history). Every change goes into the same database and rebuilds the dashboard.
   the weekly digest. By default a message only says *what kind* of thing happened, without names or amounts, because
   it passes through the ntfy server (`--detail full` with your own ntfy server).
 
+## r18: salary or dividend, a car in your net worth, pay off or invest, pension fiche
+
+- **Verloning of dividend** (BV tab, tool `remuneration_vs_dividend`): for the company's profit before your pay
+  (last 12 months, cash basis, or a figure you give) every split between remuneration and the rest: net remuneration
+  after social contributions and personal income tax (2026), corporate tax (20 % with at least € 50.000 remuneration),
+  and the rest as ordinary dividend, VVPRbis, liquidation reserve or kept. Settings (`set_tax_profile` or the update
+  app): municipal tax rate, children, VVPRbis. A calculation aid, not tax advice.
+- **Wagen als bezit** (`add_vehicle`, `set_depreciation`): a car at a value that falls by a fixed percentage a year
+  from the purchase price; a real value you enter later becomes the new starting point. Shown under Beleggingen.
+- **Extra aflossen of beleggen?** (Planner tab, `loan_prepayment`): per loan the reinvestment fee, interest saved,
+  shorter term or lower instalment, and what you'd have on the original end date compared with investing.
+- **Pensioenfiche inlezen** (update app → Pensioen, `import_pension_statement`): reads the reserve, the expected
+  capital and the premium from the insurer's PDF; you check them before they're saved.
+- **Pensioen in de bijwerk-app**: birth date, pension age, stop-working age, legal pension, spending and investing
+  (empty = from history), and per large expense whether it counts.
+
 ## Categories and your own rules
 
 `centen categories` lists them. Fix things from the CLI or by asking Claude:

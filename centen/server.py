@@ -84,6 +84,8 @@ services; adjust with `set_fixed_cost`, add missing ones with `add_fixed_cost`),
 the coming months with low points and warnings), `pension_overview` + `set_pension_profile` (the four pillars, projected
 to the pension date), `scenario_plan` (wealth projection and financial independence with what-if scenarios) and
 `phone_notifications` (ntfy push to the phone). Dashboard tabs: "Vaste kosten", "Prognose", "Pensioen", "Planner".
+r18: `remuneration_vs_dividend` + `set_tax_profile`, `add_vehicle` / `set_depreciation` (a car at a depreciating value
+in the net worth), `loan_prepayment` (pay off or invest), `import_pension_statement` (read the insurer's pension fiche).
 
 How to help:
 - Answer in the user's language (often Dutch or French) and in everyday words. Explain Belgian banking terms when
@@ -1051,6 +1053,89 @@ def phone_notifications(action: Literal["status", "test", "send_now", "preview"]
     s = notify.settings()
     return _out({"configured": notify.configured(), "server": s["ntfy"]["url"], "detail": s["detail"],
                  "opens": s.get("public_url") or None})
+
+
+# --- r18: salary or dividend, cars, paying off loans, pension fiche ---------------------------------------------
+
+@_tool(READ)
+def remuneration_vs_dividend(profit: Optional[float] = None, remuneration: Optional[float] = None,
+                             step: float = 5000.0) -> str:
+    """Salary or dividend for the company owner: for a yearly company profit before the director's pay (default:
+    last 12 months, cash basis: revenue − VAT − costs) and splits from € 0 to all of it as remuneration, what ends up in
+    the owner's pocket: remuneration net of social contributions and personal income tax (2026 brackets, municipal
+    surcharge, children), corporate tax (20 % on € 100.000 with at least € 50.000 remuneration, else 25 %), and the
+    rest as ordinary dividend (30 %), VVPRbis (18 %, if eligible), liquidation reserve (10 % + 9,8 % after 3 years) or
+    kept. Returns the current split, the best one and the gain. A calculation aid, not tax advice: mention the
+    simplifications (notes) and suggest checking with the accountant. Settings: set_tax_profile."""
+    from . import remuneration as R
+    with _conn() as c:
+        res = R.compare(c, _today(), profit, remuneration, step)
+    return _out(res)
+
+
+@_tool(LOCAL_EDIT)
+def set_tax_profile(municipal_rate: Optional[float] = None, children: Optional[int] = None,
+                    vvprbis: Optional[bool] = None, social_fee: Optional[float] = None) -> str:
+    """Personal tax settings for remuneration_vs_dividend: municipal_rate in % (e.g. 7.5; it's on the tax bill),
+    children = dependent children (raises the tax-free amount), vvprbis = the company's shares qualify for VVPRbis
+    (cash contribution after July 2013), social_fee = the social insurance fund's management fee (default 3,05 %)."""
+    from . import remuneration as R
+    return _edit_call(lambda c: R.set_profile(c, municipal_rate, children, vvprbis, social_fee))
+
+
+@_tool(LOCAL_EDIT)
+def add_vehicle(name: str, purchase_price: float, purchase_date: str, yearly_depreciation: float,
+                scope: Literal["personal", "business"] = "personal", provider: Optional[str] = None,
+                floor_pct: Optional[float] = None) -> str:
+    """Add a car (or boat, equipment) to the net worth at a value that falls by yearly_depreciation % per year from
+    the purchase price (declining balance; floor_pct = never below this % of the price). A value entered later with
+    set_asset_value (a quote, an offer) becomes the new starting point. The purchase payment stays an expense in the
+    spending. Ask the user for the percentage: popular sports cars often lose 3-8 % a year, an ordinary car 12-20 %."""
+    from . import depreciation
+    return _edit_call(lambda c: depreciation.add_vehicle(c, name, purchase_price, purchase_date, yearly_depreciation,
+                                                         scope, provider, floor_pct, _today()))
+
+
+@_tool(LOCAL_EDIT)
+def set_depreciation(account: str, yearly_depreciation: Optional[float] = None, purchase_price: Optional[float] = None,
+                     purchase_date: Optional[str] = None, floor_pct: Optional[float] = None,
+                     remove: bool = False) -> str:
+    """Change (or with remove=True stop) the depreciation schedule of an asset added with add_vehicle, or give an
+    existing 'other asset' account a schedule (then purchase_price, purchase_date and yearly_depreciation are needed)."""
+    from . import depreciation
+    if remove:
+        return _edit_call(lambda c: depreciation.remove_schedule(c, account))
+    return _edit_call(lambda c: depreciation.set_schedule(c, account, purchase_price, purchase_date,
+                                                          yearly_depreciation, floor_pct, _today()))
+
+
+@_tool(READ)
+def loan_prepayment(amount: float, loan: Optional[str] = None, expected_return: float = 0.05,
+                    tax_on_gains: float = 0.10) -> str:
+    """Pay off a loan early or invest the money? For an amount now: the reinvestment fee (3 months' interest), the
+    interest saved and the new end date (shorter) or the new instalment (lower), and what you'd have on the loan's
+    original end date versus investing it at expected_return (fraction) with tax_on_gains on the gains; plus the
+    break-even return. Without loan: the dearest loan first, all loans listed. Mention the notes (tax benefits on
+    older loans aren't included)."""
+    from . import prepay
+    with _conn() as c:
+        try:
+            return _out(prepay.analyse(c, amount, loan, expected_return, tax_on_gains, _today()))
+        except ValueError as e:
+            return _out({"error": str(e)})
+
+
+@_tool(LOCAL_EDIT)
+def import_pension_statement(path: str, account: Optional[str] = None, apply: bool = False) -> str:
+    """Read a pension fiche (PDF) from an insurer: the reserve (value now) with its date, the expected capital at the
+    pension date and the yearly premium. apply=False shows what was found (with the line it came from) so the user
+    can check it; apply=True saves the reserve as the account's value and the other two in the pension profile.
+    The update app (Pensioen tab) offers the same with an upload."""
+    from . import pension
+    p = os.path.expanduser(path)
+    if not os.path.exists(p):
+        return _out({"error": f"File not found: {path}"})
+    return _edit_call(lambda c: pension.import_statement(c, p, account, apply, today=_today()), refresh=apply)
 
 
 # --- prompts (show up as slash commands in Claude Desktop) ---------------------------

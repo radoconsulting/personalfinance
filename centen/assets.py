@@ -446,6 +446,8 @@ def update_account(conn, account: str, name: str | None = None, provider: str | 
 def set_value(conn, account: str, value: float, value_date: str | None = None, today: date | None = None) -> dict:
     acc = find(conn, account)
     _set(conn, acc["id"], VALUATION, abs(value) if acc["account_type"] == "loan" else value, value_date, today)
+    from . import depreciation  # a car with a schedule continues from the value entered
+    depreciation.reanchor(conn, acc["id"], value, (value_date or _today(today).isoformat()))
     conn.commit()
     return describe(conn, acc["id"], today)
 

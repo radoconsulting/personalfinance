@@ -161,8 +161,17 @@ def _r17(conn, today: date) -> dict:
         f["events_next_60_days"] = f["events_next_60_days"][:80]
         return f
 
+    from . import depreciation, prepay, remuneration
+
+    def remun():
+        r = remuneration.compare(conn, today)
+        return r if (r["profit"] or 0) > 0 else None
+
     return {"fixed": _safe(fixed.report, conn, today), "forecast": _safe(forecast_view),
-            "pension": _safe(pension.overview, conn, today), "planner": _safe(planner.plan, conn, today)}
+            "pension": _safe(pension.overview, conn, today), "planner": _safe(planner.plan, conn, today),
+            "remuneration": _safe(remun), "prepay": _safe(lambda: {"loans": prepay.loans_for_calc(conn, today),
+                                                                   "fee_months": prepay.FEE_MONTHS}),
+            "vehicles": _safe(depreciation.list_all, conn, today)}
 
 
 def render(data: dict) -> str:
@@ -173,6 +182,11 @@ def render(data: dict) -> str:
 def build(conn, path: Path | str | None = None, today: date | None = None) -> Path:
     path = Path(path) if path else config.home() / "dashboard.html"
     today = today or date.today()
+    try:
+        from . import depreciation
+        depreciation.apply(conn, today)  # cars and other things that lose value: today's estimate
+    except Exception:  # noqa: BLE001
+        pass
     data = collect(conn, today)
     _daily(conn, today, data)
     data.update(_extras(conn, today))

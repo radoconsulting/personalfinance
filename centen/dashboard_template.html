@@ -669,6 +669,28 @@ function viewBusiness(v) {
   const tax = taxCheck();
   if (tax.length) { const t = card("Fiscaal"); t.body.append(el("div", {class: "alerts"}, tax)); t.root.classList.add("span4"); g.append(t.root); }
   v.append(g);
+  const R = D.remuneration;
+  if (R && !R.error) {
+    const NM = {ordinary: "gewoon dividend (30 %)", vvprbis: "VVPRbis (18 %)", liquidation_reserve: "liquidatiereserve (10 % + 9,8 %)"};
+    const rc = card("Verloning of dividend?", `Winst vóór je bezoldiging ${eur(R.profit)} per jaar (laatste 12 maanden, kasbasis). Wat hou je netto over bij elke verdeling?`, {table: () => table([
+      {label: "Bezoldiging", num: true, get: r => eur(r.remuneration)}, {label: "Netto loon", num: true, get: r => eur(r.remuneration_net)},
+      {label: "VenB", num: true, get: r => eur(r.corporate_tax)}, {label: "Rest netto", num: true, get: r => eur(r.distribution_net[r.best_distribution])},
+      {label: "Via", get: r => NM[r.best_distribution] || r.best_distribution}, {label: "Samen netto", num: true, get: r => eur(r.net_total)}], R.grid)});
+    rc.root.style.marginTop = "14px";
+    const cur = R.current, best = R.best;
+    const tiles = (el("div", {class: "grid g4", style: "margin-top:14px"},
+      tile("Nu", eur(cur.net_total), `bezoldiging ${eur(cur.remuneration)} + rest via ${NM[cur.best_distribution] || cur.best_distribution}`),
+      tile("Beste verdeling", eur(best.net_total), `bezoldiging ${eur(best.remuneration)} + rest via ${NM[best.best_distribution] || best.best_distribution}`),
+      tile("Verschil per jaar", eurS(R.gain_vs_current), best.reduced_rate ? "met het verlaagd VenB-tarief (≥ € 50.000 bezoldiging)" : "zonder verlaagd VenB-tarief"),
+      tile("Netto van de winst", pct(best.net_share), `belastingen en bijdragen samen ${eur(best.total_tax)}`)));
+    v.append(tiles, rc.root);
+    requestAnimationFrame(() => lineChart(rc.body, {labels: R.grid.map(r => String(r.remuneration)), fmtX: (x, long) => long ? "bezoldiging " + eur(+x) : (+x >= 1000 ? Math.round(+x / 1000) + "k" : x),
+      series: [{name: "Samen netto", values: R.grid.map(r => r.net_total), color: SERIES[0]}, {name: "Netto loon", values: R.grid.map(r => r.remuneration_net), color: SERIES[1]},
+        {name: "Rest netto", values: R.grid.map(r => r.distribution_net[r.best_distribution]), color: SERIES[2]}], height: 260}));
+    v.append(el("div", {style: "margin-top:14px"}, notesCard("Hoe deze vergelijking rekent", R.notes.concat([
+      `Gemeentebelasting ${pct(R.profile.municipal_rate)}, ${R.profile.children} kind(eren) ten laste, beheerskosten sociaal fonds ${pct(R.profile.social_fee)}. Aanpassen in de bijwerk-app (Pensioen → Belastingprofiel) of via Claude.`,
+      "Een rekenhulp, geen fiscaal advies: overleg met je boekhouder voor je de verdeling wijzigt."]))));
+  }
   requestAnimationFrame(() => {
     segmented(split.body, parts);
     lineChart(c.body, {labels: full(ms).map(m => m.month), series: [{name: "Inkomsten", values: full(ms).map(m => m.income), color: SERIES[0]},
@@ -859,6 +881,18 @@ function viewInvest(v) {
     hbars(b.body, dest, {signed: true, label: r => nlName(r.destination), value: r => r.net_deposited, color: "var(--pos)",
       extra: r => [{name: "Sinds", value: dLabel(r.since)}, {name: "Laatste", value: dLabel(r.last)}]});
   });
+  vehiclesCard(v);
+}
+
+function vehiclesCard(v) {
+  const V = D.vehicles;
+  if (!V || V.error || !V.length) return;
+  const c = card("Wat aan waarde verliest", "Geschatte waarde met een vaste afschrijving per jaar; een echte waarde (offerte, bod) die je ingeeft wordt het nieuwe vertrekpunt");
+  c.body.append(table([{label: "Wat", get: r => r.name}, {label: "Gekocht", get: r => `${dLabel(r.purchase_date)} · ${eur(r.purchase_price)}`},
+    {label: "Afschrijving", num: true, get: r => pct(r.yearly_rate) + " / jaar"}, {label: "Waarde nu", num: true, get: r => eur(r.value_now)},
+    {label: "Kost / maand (komend jaar)", num: true, get: r => eur(r.cost_per_month_next_year)}], V));
+  c.root.style.marginTop = "14px";
+  v.append(c.root);
 }
 
 function viewAccounts(v) {
@@ -1417,6 +1451,72 @@ function planProject(I, sc) {
   return {rows, fi, depleted, atRet: atRet ? atRet.capital : null, real};
 }
 
+
+// Pay off early or invest: the same calculation as centen/prepay.py (keep both in step).
+function ppAnnuity(b, r, n) { return n <= 0 ? b : (r === 0 ? b / n : b * r / (1 - (1 + r) ** -n)); }
+function ppPayments(b, r, inst, n) {
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    if (b <= 0.005) { out.push(0); continue; }
+    b = b * (1 + r);
+    const pay = k < n - 1 ? Math.min(inst, b) : b;
+    b -= pay; out.push(pay);
+  }
+  return out;
+}
+const ppAfterTax = (v, paid, tax) => paid + Math.max(0, v - paid) * (1 - tax);
+function ppFvDiff(p0, p1, rm, tax) {
+  const n = p0.length; let fv = 0, paid = 0;
+  for (let k = 0; k < n; k++) { const d = p0[k] - p1[k]; fv += d * (1 + rm) ** (n - 1 - k); paid += d; }
+  return paid > 0 ? ppAfterTax(fv, paid, tax) : fv;
+}
+function ppCalc(L, amount, ret, tax, feeMonths) {
+  const b = L.outstanding, r = L.monthly_rate, inst = L.instalment, n = L.payments_left;
+  const x = Math.min(amount, b * (1 + feeMonths * r)), paid = x / (1 + feeMonths * r), b2 = Math.max(0, b - paid);
+  const keep = ppPayments(b, r, inst, n), short = ppPayments(b2, r, inst, n);
+  const instLow = b2 > 0 ? ppAnnuity(b2, r, n) : 0, low = ppPayments(b2, r, instLow, n);
+  const sum = a => a.reduce((s, v) => s + v, 0);
+  const fv = (q, which) => { const m = (1 + q) ** (1 / 12) - 1;
+    return [ppAfterTax(x * (1 + m) ** n, x, tax), ppFvDiff(keep, which === "short" ? short : low, m, tax)]; };
+  const be = which => { const g = q => { const [a, c] = fv(q, which); return c - a; };
+    let lo = 0, hi = 0.25; if (g(lo) < 0) return 0; if (g(hi) > 0) return null;
+    for (let i = 0; i < 60; i++) { const mid = (lo + hi) / 2; if (g(mid) > 0) lo = mid; else hi = mid; } return (lo + hi) / 2; };
+  const [inv, sFv] = fv(ret, "short"), [, lFv] = fv(ret, "low");
+  return {amount: x, fee: x - paid, invest: inv,
+    shorter: {months_left: short.filter(v => v > 0.005).length, saved: sum(keep) - x - sum(short), fv: sFv, adv: sFv - inv, be: be("short")},
+    lower: {instalment: instLow, drop: inst - instLow, saved: sum(keep) - x - sum(low), fv: lFv, adv: lFv - inv, be: be("low")}};
+}
+function prepayCard(v) {
+  const PP = D.prepay;
+  if (!PP || PP.error || !PP.loans.length) return;
+  const sel = el("select", {"aria-label": "lening"}, PP.loans.map((l, i) => el("option", {value: i}, `${l.name} (${pct(l.annual_rate)})`)));
+  const amtIn = el("input", {type: "number", min: 0, step: 1000, value: 20000, "aria-label": "bedrag", style: "width:120px"});
+  const ret = el("input", {type: "range", min: 0, max: 10, step: 0.5, value: 5, "aria-label": "rendement"});
+  const retB = el("b", {}, "5 %");
+  const out = el("div");
+  const c = card("Extra aflossen of beleggen?", "Wat heb je op de oorspronkelijke einddatum van de lening: los nu af en beleg wat je daarna niet meer betaalt, of beleg het bedrag meteen");
+  c.body.append(el("div", {class: "ctrl"}, el("label", {}, el("span", {}, "Lening"), sel), el("label", {}, el("span", {}, "Bedrag nu"), amtIn),
+    el("label", {}, el("span", {}, "Rendement bij beleggen ", retB), ret)), out);
+  const draw = () => {
+    const L = PP.loans[+sel.value], q = +ret.value / 100;
+    retB.textContent = num1.format(+ret.value) + " %";
+    const r = ppCalc(L, Math.max(0, +amtIn.value || 0), q, 0.10, PP.fee_months);
+    const endShort = (() => { const d = new Date(S_TODAY()); d.setMonth(d.getMonth() + r.shorter.months_left); return d.toISOString().slice(0, 10); })();
+    out.textContent = "";
+    out.append(el("div", {class: "grid g4", style: "margin-top:12px"},
+      tile("Korter lopen", `${r.shorter.adv >= 0 ? "+" : "−"}${eur(Math.abs(r.shorter.adv))}`, `t.o.v. beleggen · lening klaar rond ${dLabel(endShort)} · ${eur(r.shorter.saved)} interest bespaard`),
+      tile("Lagere aflossing", `${r.lower.adv >= 0 ? "+" : "−"}${eur(Math.abs(r.lower.adv))}`, `t.o.v. beleggen · nieuwe aflossing ${eur(r.lower.instalment)} (−${eur(r.lower.drop)})`),
+      tile("Beleggen", eur(r.invest), `op ${dLabel(L.maturity_date)}, na 10 % meerwaardebelasting op de winst`),
+      tile("Omslagpunt", r.shorter.be == null ? "—" : pct(r.shorter.be), "boven dit rendement wint beleggen")));
+    out.append(el("div", {class: "note", style: "margin-top:8px"}, `Wederbeleggingsvergoeding ${eur(r.fee)} (3 maanden interest) zit erin. Niet meegerekend: een belastingvoordeel op de lening (woonbonus of langetermijnsparen bij leningen van vóór 2020) en het risico van beleggen.`));
+  };
+  for (const e of [sel, amtIn, ret]) e.addEventListener("input", draw);
+  c.root.style.marginTop = "14px";
+  v.append(c.root);
+  draw();
+}
+const S_TODAY = () => D.meta.today;
+
 function viewPlanner(v) {
   const PL = D.planner;
   if (sectionError(v, PL, "Planner")) return;
@@ -1484,6 +1584,7 @@ function viewPlanner(v) {
     (I.loans || []).length ? `Leningen: ${I.loans.map(l => `${l.name} ${eur(l.instalment_monthly)}/maand tot ${dLabel(l.ends)}`).join("; ")} (de uitgaven dalen als ze aflopen).` : "Geen leningen met een aflossingsplan.",
     PL.disclaimer]));
   v.append(g);
+  prepayCard(v);
 }
 
 const VIEWS = {fixed: viewFixed, forecast: viewForecast, pension: viewPension, planner: viewPlanner, tax: viewTax, total: viewTotal, personal: viewPersonal, business: viewBusiness, household: viewHousehold, invest: viewInvest, accounts: viewAccounts};

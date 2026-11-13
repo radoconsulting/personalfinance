@@ -192,7 +192,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
     from .loans import SCHEMA as LOANS_SCHEMA
     conn.executescript(HISTORY_SCHEMA + NETWORTH_SCHEMA + ANALYSIS_SCHEMA + LOANS_SCHEMA)
     from .fixed import SCHEMA as FIXED_SCHEMA
-    conn.executescript(FIXED_SCHEMA)
+    from .depreciation import SCHEMA as DEPRECIATION_SCHEMA
+    conn.executescript(FIXED_SCHEMA + DEPRECIATION_SCHEMA)
 
 
 def connect(path: Path | str | None = None) -> sqlite3.Connection:

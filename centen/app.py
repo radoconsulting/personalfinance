@@ -16,7 +16,7 @@ import secrets
 import threading
 import webbrowser
 from contextlib import closing
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -99,7 +99,38 @@ def state(conn, today: date | None = None) -> dict:
     out["targets"] = analysis.targets(conn)
     out["imports_folder"] = str(config.home().parent / "imports")
     out["broker_accounts"] = [a["name"] for a in accs if a["type"] in ("investment", "crypto")]
+    out["pension"] = _pension_state(conn, today)
     return out
+
+
+def _pension_state(conn, today: date) -> dict:
+    """What the Pensioen tab needs: the profile, the figures from history, recent large expenses to (un)mark."""
+    from . import pension, remuneration
+    p = pension.profile(conn)
+    try:
+        o = pension.overview(conn, today)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+    sp, inv = o["spending_profile"], o["investing"]
+    excl, incl = set(p.get("one_off_exclude") or []), set(p.get("one_off_include") or [])
+    auto = {x["id"] for x in sp["one_offs"] if x["reason"] == "auto"}
+    big = []
+    for r in conn.execute(
+            "SELECT t.id, t.booking_date, t.merchant, t.category, t.amount FROM transactions t JOIN accounts a "
+            "ON a.id=t.account_id WHERE COALESCE(a.scope,'personal')='personal' AND t.kind='expense' AND t.amount<=-1000 "
+            "AND COALESCE(t.category,'') != 'Loans & mortgage' "
+            "AND t.booking_date>=? AND t.status='booked' ORDER BY t.amount LIMIT 40",
+            ((today - timedelta(days=365)).isoformat(),)):
+        state_ = "manual" if r["id"] in excl else "kept" if r["id"] in incl else "auto" if r["id"] in auto else "counted"
+        big.append({"id": r["id"], "date": r["booking_date"], "merchant": r["merchant"], "category": r["category"],
+                    "amount": round(-r["amount"], 2), "state": state_})
+    return {"profile": {k: p.get(k) for k in ("birth_date", "retirement_age", "stop_work_age", "legal_pension_monthly",
+                                              "spending_monthly", "investing_yearly", "investing_years",
+                                              "one_off_threshold")},
+            "spending_from_history": sp["monthly_from_history"], "investing_from_history": inv["yearly_from_history"],
+            "investing_per_year": inv["per_year"], "big_expenses": big,
+            "pension_accounts": [a["name"] for x in o["pillars"] if x["pillar"] in (2, 3) for a in x["accounts"]],
+            "tax": remuneration.profile(conn)}
 
 
 # --- actions --------------------------------------------------------------------------------------
@@ -127,6 +158,36 @@ def act(conn, action: str, p: dict) -> dict:
         return assets.add_account(conn, p["name"], p["type"], amount(p["value"]) if p.get("value") else None,
                                   day(p.get("date")), p.get("provider") or None, p.get("scope") or None,
                                   [m.strip() for m in str(p.get("match") or "").split(",") if m.strip()] or None)
+    if action == "pension_profile":
+        from . import pension
+        vals, reset = {}, []
+        for k in ("birth_date", "retirement_age", "stop_work_age", "legal_pension_monthly", "spending_monthly",
+                  "investing_yearly", "investing_years", "one_off_threshold"):
+            if k not in p:
+                continue
+            v = str(p[k] if p[k] is not None else "").strip()
+            if v == "":
+                if k in ("stop_work_age", "spending_monthly", "investing_yearly", "legal_pension_monthly"):
+                    reset.append(k)
+                continue
+            vals[k] = day(v) if k == "birth_date" else (int(amount(v)) if k in ("retirement_age", "stop_work_age",
+                                                                              "investing_years") else amount(v))
+        return pension.set_profile(conn, reset=reset or None, **vals)
+    if action == "one_off":
+        from . import pension
+        val = {"out": True, "in": False, "auto": None}[p["state"]]
+        return pension.mark_one_off(conn, [p["id"]], val)
+    if action == "pension_values":
+        from . import pension
+        return pension.apply_values(conn, p["account"], amount(p["reserve"]) if str(p.get("reserve") or "").strip() else None,
+                                    day(p.get("date")) if p.get("date") else None,
+                                    amount(p["expected"]) if str(p.get("expected") or "").strip() else None,
+                                    amount(p["premium"]) if str(p.get("premium") or "").strip() else None)
+    if action == "tax_profile":
+        from . import remuneration
+        return remuneration.set_profile(conn, amount(p["municipal_rate"]) if str(p.get("municipal_rate") or "").strip() else None,
+                                        int(amount(p["children"])) if str(p.get("children") or "").strip() else None,
+                                        bool(p.get("vvprbis")) if "vvprbis" in p else None)
     raise ValueError(f"Onbekende actie {action}")
 
 
@@ -139,6 +200,11 @@ def upload(conn, kind: str, account: str | None, filename: str, data: bytes) -> 
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / safe
     path.write_bytes(data)
+    if kind == "pension":
+        from . import pension
+        if not safe.lower().endswith(".pdf"):
+            raise ValueError("Verwacht de pensioenfiche als PDF.")
+        return {"saved_as": str(path), "result": pension.import_statement(conn, str(path), account or None)}
     if kind == "broker":
         from . import portfolio
         if not account:

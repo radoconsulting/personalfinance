@@ -408,3 +408,113 @@ def overview(conn, today: date | None = None) -> dict:
                  "pensioen gaan het wettelijk pensioen (malus), tenzij je aan de loopbaanvoorwaarden voldoet. De "
                  "officiële cijfers staan op je pensioenfiche (verzekeraar) en op mypension.be.",
     }
+
+
+# --- pension statements (r18): read the yearly pension fiche of an insurer -----------------------------------
+
+_AMOUNT = re.compile(r"(?:€|eur\b)?\s*(\d{1,3}(?:[.\s ]\d{3})+(?:,\d{1,2})?|\d+,\d{2})\s*(?:€|eur\b)?", re.I)
+_DATE = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
+_KINDS = {
+    "reserve": (re.compile(r"verworven\s+reserve|r[eé]serves?\s+acquises?|opgebouwde\s+reserve|reserve\s+op|"
+                           r"theoretische\s+afkoopwaarde|afkoopwaarde|valeur\s+de\s+rachat", re.I), 2),
+    "expected": (re.compile(r"te\s+verwachten|verwachte\s+(?:prestatie|kapitaal|pensioen)|geraamde?\s+(?:prestatie|"
+                            r"kapitaal)|raming|prestations?\s+attendues?|estimation|kapitaal\s+op\s+(?:de\s+)?"
+                            r"pensioen|op\s+(?:de\s+)?(?:pensioen|eind)(?:datum|leeftijd)", re.I), 2),
+    "premium": (re.compile(r"(?:jaar|jaarlijkse|totale|betaalde|gestorte)\s*premie|premie\s+(?:per\s+jaar|van\s+het\s+"
+                           r"jaar|\d{4})|primes?\s+(?:annuelles?|vers[ée]es?)", re.I), 1),
+}
+
+
+def _amount(s: str) -> float | None:
+    m = _AMOUNT.findall(s)
+    if not m:
+        return None
+    raw = m[-1].replace(" ", "").replace(" ", "").replace(" ", "").replace(".", "").replace(",", ".")
+    try:
+        v = float(raw)
+    except ValueError:
+        return None
+    return v if v >= 10 else None
+
+
+def parse_statement_text(text: str) -> dict:
+    """Pick the reserve, the expected capital at the pension date and the yearly premium out of a pension fiche."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    found = {}
+    for i, ln in enumerate(lines):
+        for kind, (rx, look) in _KINDS.items():
+            if kind in found or not rx.search(ln):
+                continue
+            for j in range(i, min(i + look, len(lines))):  # the amount can be on the next line
+                v = _amount(lines[j])
+                if v is not None:
+                    d = _DATE.search(ln) or _DATE.search(lines[j])
+                    found[kind] = {"amount": round(v, 2), "line": ln[:160] + ("" if j == i else " / " + lines[j][:80]),
+                                   "date": f"{d.group(3)}-{int(d.group(2)):02d}-{int(d.group(1)):02d}" if d else None}
+                    break
+    age = re.search(r"(?:pensioen|eind)?leeftijd\s+(?:van\s+)?(\d{2})\s*jaar|op\s+(\d{2})\s*jaar|à\s+(\d{2})\s*ans",
+                    text, re.I)
+    if age:
+        found["age"] = int(next(g for g in age.groups() if g))
+    d = re.search(r"(?:situatie|toestand|stand|op datum van|situation)\s+(?:op|au|van)?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})",
+                  text, re.I)
+    if d:
+        found["statement_date"] = f"{d.group(3)}-{int(d.group(2)):02d}-{int(d.group(1)):02d}"
+    return found
+
+
+def read_statement(path: str) -> str:
+    try:
+        import pdfplumber
+    except ImportError as e:  # pragma: no cover
+        raise ValueError("pdfplumber is needed to read PDFs (pip install pdfplumber)") from e
+    with pdfplumber.open(path) as pdf:
+        return "\n".join(p.extract_text() or "" for p in pdf.pages[:12])
+
+
+def import_statement(conn, path: str | None = None, account: str | None = None, apply: bool = False,
+                     text: str | None = None, today: date | None = None) -> dict:
+    """Read a pension fiche (PDF) and, with apply=True, save the reserve as the account's value, the expected capital
+    as expected_at_retirement and the yearly premium."""
+    today = today or date.today()
+    raw = text if text is not None else read_statement(path)
+    found = parse_statement_text(raw)
+    accs = [a for a in AS.list_accounts(conn, today) if a["type"] in ("pension", "insurance")]
+    if account:
+        acc = AS.find(conn, account)
+        name = acc["name"]
+    elif len(accs) == 1:
+        name = accs[0]["name"]
+    else:
+        name = None
+    out = {"account": name, "found": found, "applied": False,
+           "accounts": [a["name"] for a in accs]}
+    if not found:
+        out["note"] = ("Niets herkend. Geef de bedragen zelf in (reserve, verwacht kapitaal, premie) of stuur de "
+                       "tekst door.")
+        return out
+    if apply:
+        if not name:
+            raise ValueError("Kies de pensioenrekening waartoe de fiche hoort.")
+        apply_values(conn, name, reserve=(found.get("reserve") or {}).get("amount"),
+                     reserve_date=(found.get("reserve") or {}).get("date") or found.get("statement_date"),
+                     expected=(found.get("expected") or {}).get("amount"),
+                     premium=(found.get("premium") or {}).get("amount"), today=today)
+        out["applied"] = True
+    return out
+
+
+def apply_values(conn, account: str, reserve: float | None = None, reserve_date: str | None = None,
+                 expected: float | None = None, premium: float | None = None, today: date | None = None) -> dict:
+    acc = AS.find(conn, account)
+    if reserve is not None:
+        AS.set_value(conn, acc["name"], float(reserve), reserve_date, today=today)
+    settings = {}
+    if expected is not None:
+        settings["expected_at_retirement"] = float(expected)
+    if premium is not None:
+        settings["premium_yearly"] = float(premium)
+    if settings:
+        set_profile(conn, accounts={acc["name"]: settings})
+    return {"account": acc["name"], "reserve": reserve, "reserve_date": reserve_date, "expected": expected,
+            "premium": premium}
