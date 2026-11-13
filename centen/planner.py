@@ -32,10 +32,11 @@ def inputs(conn, today: date | None = None) -> dict:
     prof = pen["profile"]
     tot = A.totals(conn)
     asum = AS.summary(conn, today)
+    # Only what can grow and be lived from: not the home, not a car or other "asset" accounts.
     personal_inv = sum(AS.counted_value(a) for a in asum["accounts"]
-                       if a["type"] in ("investment", "crypto", "insurance", "asset") and a["scope"] == "personal")
+                       if a["type"] in ("investment", "crypto", "insurance") and a["scope"] == "personal")
     company_inv = sum(AS.counted_value(a) for a in asum["accounts"]
-                      if a["type"] in ("investment", "crypto", "insurance", "asset") and a["scope"] == "business")
+                      if a["type"] in ("investment", "crypto", "insurance") and a["scope"] == "business")
     p23 = [x for x in pen["pillars"] if x["pillar"] in (2, 3)]
     p23_now = sum(x.get("value_now") or 0 for x in p23)
     p23_at_ret = sum(x.get("after_tax_today_eur") or 0 for x in p23)
