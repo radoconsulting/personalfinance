@@ -100,6 +100,8 @@ def state(conn, today: date | None = None) -> dict:
     out["imports_folder"] = str(config.home().parent / "imports")
     out["broker_accounts"] = [a["name"] for a in accs if a["type"] in ("investment", "crypto")]
     out["pension"] = _pension_state(conn, today)
+    from . import crypto_sync
+    out["crypto"] = {**crypto_sync.status(conn), "accounts": [a["name"] for a in accs if a["type"] == "crypto"]}
     return out
 
 
@@ -184,6 +186,18 @@ def act(conn, action: str, p: dict) -> dict:
                                     amount(p["expected"]) if str(p.get("expected") or "").strip() else None,
                                     amount(p["premium"]) if str(p.get("premium") or "").strip() else None,
                                     return_=amount(p["return"]) / 100 if str(p.get("return") or "").strip() else None)
+    if action == "bitvavo_key":
+        from . import crypto_sync
+        if p.get("remove"):
+            return crypto_sync.set_bitvavo(conn, None, None)
+        return crypto_sync.set_bitvavo(conn, p.get("key"), p.get("secret"), p.get("account") or "Bitvavo")
+    if action == "wallet":
+        from . import crypto_sync
+        addrs = [a for a in re.split(r"[\s,;]+", p.get("addresses") or "") if a]
+        return crypto_sync.set_wallet(conn, p["account"], p["coin"], p.get("xpub") or None, addrs, bool(p.get("remove")))
+    if action == "crypto_sync":
+        from . import crypto_sync
+        return crypto_sync.sync(conn)
     if action == "tax_profile":
         from . import remuneration
         return remuneration.set_profile(conn, amount(p["municipal_rate"]) if str(p.get("municipal_rate") or "").strip() else None,

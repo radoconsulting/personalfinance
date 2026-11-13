@@ -2,7 +2,8 @@
 
 - serves the dashboard (`/`), the update app (`/bijwerken`) and the weekly digest (`/digest`) behind a login,
 - offers the MCP tools over HTTP at `/mcp` (Bearer key), for Claude Desktop via `centen remote`,
-- runs the schedule itself: bank sync twice a day, prices every hour, price history daily, the digest weekly.
+- runs the schedule itself: bank sync twice a day, prices every hour, price history daily, crypto (Bitvavo API,
+  hardware wallets) daily, the digest weekly.
 
 Start with `centen web` (Docker: the image's default command). Access key: env CENTEN_KEY, else generated once and
 kept in the data folder (`web_key`); `centen web --show-key` prints it. Meant for your home network or a VPN
@@ -59,7 +60,7 @@ def _csrf(key: str) -> str:
 # --- schedule -------------------------------------------------------------------------------------
 
 DEFAULT_SCHEDULE = {"sync": ["07:40", "18:40"], "prices_from": 8, "prices_to": 22, "digest": "mon 08:20",
-                    "alerts": "08:30"}
+                    "alerts": "08:30", "crypto": "07:55"}
 
 
 def _schedule_cfg() -> dict:
@@ -101,6 +102,16 @@ def _prices(c):
     return {"updated": res.get("updated"), "missing": len(res.get("missing") or [])}
 
 
+def _crypto(c):
+    from . import crypto_sync, dashboard
+    st = crypto_sync.status(c)
+    if not st["bitvavo"]["configured"] and not st["wallets"]:
+        return {"skipped": "no Bitvavo key or wallets"}
+    res = crypto_sync.sync(c)
+    dashboard.refresh(c)
+    return res
+
+
 def _digest(c):
     from . import digest, notify
     d, p = digest.write(c)
@@ -134,6 +145,9 @@ def scheduler(stop: threading.Event):
         if now.strftime("%a").lower().startswith(dday[:3].lower()) and hm == dtime and f"digest {today}" not in done:
             done.add(f"digest {today}")
             _job("digest", _digest)
+        if hm == s.get("crypto") and f"crypto {today}" not in done:
+            done.add(f"crypto {today}")
+            _job("crypto", _crypto)
         if hm == s.get("alerts") and f"alerts {today}" not in done:
             done.add(f"alerts {today}")
             _job("alerts", _alerts)

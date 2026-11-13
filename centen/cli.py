@@ -164,6 +164,14 @@ def _prices(conn, force=False, quiet=True):
     return res
 
 
+def cmd_crypto(args):
+    from . import crypto_sync, dashboard
+    with closing(db.connect()) as c:
+        res = crypto_sync.sync(c)
+        dashboard.refresh(c)
+    _print(res)
+
+
 def cmd_prices(a):
     from . import prices
     with closing(db.connect()) as conn:
@@ -738,6 +746,9 @@ def build_parser():
                    help="Fix the quote used, e.g. IE0031442068=IUSA.AS (empty symbol = automatic)")
     s.add_argument("--quiet", action="store_true", help="Don't print the prices (scheduled task)")
     s.set_defaults(func=cmd_prices)
+
+    s = sub.add_parser("crypto", help="Update crypto: Bitvavo API and hardware wallets (xpub/addresses)")
+    s.set_defaults(func=cmd_crypto)
 
     s = sub.add_parser("member", help="Household members whose own accounts aren't linked (e.g. your partner)")
     ms = s.add_subparsers(dest="action", required=True)

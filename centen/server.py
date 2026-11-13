@@ -1155,6 +1155,35 @@ def possessions() -> str:
     return _out(res)
 
 
+@_tool(BANK_READ)
+def sync_crypto() -> str:
+    """Update crypto by itself: new Bitvavo transactions through its API (a key with only the View right, saved in
+    the update app or with set_crypto_source) plus a check of the Bitvavo balance against the holdings, and hardware
+    wallets (Ledger…) read from the public blockchain: bitcoin from an xpub/ypub/zpub or addresses (mempool.space),
+    ether from an address (public Ethereum node). Runs daily on the server by itself. Only public keys and
+    addresses are sent; nothing can be moved with them."""
+    from . import crypto_sync, dashboard
+    with _conn() as c:
+        res = crypto_sync.sync(c, today=_today())
+        dashboard.refresh(c)
+    return _out(res)
+
+
+@_tool(LOCAL_EDIT)
+def set_crypto_source(account: str, coin: Optional[str] = None, xpub: Optional[str] = None,
+                      addresses: Optional[list[str]] = None, remove: bool = False) -> str:
+    """Set what sync_crypto reads for a hardware wallet account: coin BTC with an extended PUBLIC key (xpub/ypub/zpub,
+    Ledger Live → account → Edit account → Advanced) and/or addresses, or coin ETH with addresses (0x…). remove=True
+    stops reading that coin. Never accept a recovery phrase or private key: refuse and tell the user not to share it.
+    The Bitvavo API key is entered by the user in the update app (Beleggingen & pensioen → Crypto automatisch), not
+    here."""
+    from . import crypto_sync
+    if not coin:
+        with _conn() as c:
+            return _out(crypto_sync.status(c))
+    return _edit_call(lambda c: crypto_sync.set_wallet(c, account, coin, xpub, addresses, remove), refresh=False)
+
+
 # --- prompts (show up as slash commands in Claude Desktop) ---------------------------
 
 @server.prompt()

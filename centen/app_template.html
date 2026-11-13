@@ -161,6 +161,53 @@ function vSavings(v) {
   v.append(c);
 }
 
+function cryptoCard() {
+  const C = S.crypto || {bitvavo: {}, wallets: [], accounts: []};
+  const c = el("div", {class: "card"}, el("h2", {}, "Crypto automatisch bijwerken"), el("div", {class: "sub"},
+    "Elke ochtend (07:55): nieuwe Bitvavo-transacties via de API en de saldi van je hardware wallet via de publieke blockchain. Er worden enkel publieke sleutels en adressen gebruikt: daarmee kan niemand iets verplaatsen."));
+  const accSel = () => el("select", {"aria-label": "rekening"}, C.accounts.map(n => el("option", {value: n}, n)));
+  if (!C.accounts.length) { c.append(el("div", {class: "muted"}, "Nog geen crypto-rekening: voeg ze toe onder Nieuwe rekening (soort Crypto).")); return c; }
+  // Bitvavo
+  const bv = el("div", {style: "margin-top:6px"}, el("h3", {style: "font-size:14px;margin:8px 0 4px"}, "Bitvavo"));
+  if (C.bitvavo.configured) {
+    const rm = el("button", {class: "ghost"}, "Sleutel verwijderen");
+    rm.addEventListener("click", () => post("bitvavo_key", {remove: true}, rm, "Bitvavo-sleutel verwijderd"));
+    bv.append(el("div", {class: "row"}, el("span", {class: "chip good"}, "gekoppeld"), el("span", {class: "muted small"}, `${C.bitvavo.account} · sleutel ${C.bitvavo.key_hint}`), rm));
+  } else {
+    const a = accSel(), k = el("input", {type: "text", placeholder: "API key", "aria-label": "Bitvavo API key", autocomplete: "off", style: "width:220px"}),
+      sc = el("input", {type: "password", placeholder: "API secret", "aria-label": "Bitvavo API secret", autocomplete: "off", style: "width:220px"}), b = el("button", {class: "go"}, "Koppelen");
+    if (C.accounts.includes("Bitvavo")) a.value = "Bitvavo";
+    b.addEventListener("click", () => post("bitvavo_key", {account: a.value, key: k.value, secret: sc.value}, b, "Bitvavo gekoppeld"));
+    bv.append(el("div", {class: "muted small", style: "margin-bottom:6px"}, "Maak in Bitvavo (Instellingen → API) een sleutel met enkel het recht ‘Bekijken’ — niet ‘Handelen’ of ‘Opnemen’. De sleutel blijft op je NAS (config.json)."),
+      el("div", {class: "row"}, a, k, sc, b));
+  }
+  // wallets
+  const wl = el("div", {style: "margin-top:12px"}, el("h3", {style: "font-size:14px;margin:8px 0 4px"}, "Hardware wallet (Ledger, Trezor…)"));
+  if (C.wallets.length) wl.append(el("table", {}, el("tbody", {}, C.wallets.map(w => {
+    const rm = el("button", {class: "ghost"}, "Verwijderen");
+    rm.addEventListener("click", () => post("wallet", {account: w.account, coin: w.coin, remove: true}, rm, "Verwijderd"));
+    return el("tr", {}, el("td", {}, w.account), el("td", {}, w.coin), el("td", {class: "muted small"}, w.what), el("td", {}, rm));
+  }))));
+  const a2 = accSel(), coin = el("select", {"aria-label": "munt"}, el("option", {value: "BTC"}, "Bitcoin"), el("option", {value: "ETH"}, "Ether"));
+  if (C.accounts.includes("Ledger")) a2.value = "Ledger";
+  const xp = el("input", {type: "text", placeholder: "xpub / ypub / zpub", "aria-label": "extended public key", autocomplete: "off", style: "width:300px"});
+  const ad = el("input", {type: "text", placeholder: "of adressen (gescheiden door komma's)", "aria-label": "adressen", autocomplete: "off", style: "width:300px"});
+  coin.addEventListener("change", () => { xp.hidden = coin.value === "ETH"; ad.placeholder = coin.value === "ETH" ? "adres 0x…" : "of adressen (gescheiden door komma's)"; });
+  const add = el("button", {class: "go"}, "Toevoegen");
+  add.addEventListener("click", () => post("wallet", {account: a2.value, coin: coin.value, xpub: xp.hidden ? "" : xp.value, addresses: ad.value}, add, "Wallet toegevoegd"));
+  wl.append(el("div", {class: "muted small", style: "margin-bottom:6px"}, "Bitcoin: Ledger Live → je bitcoin-account → ⋯ → Account bewerken → Geavanceerd → de xpub. Ether: je adres (0x…). Geef nooit je herstelzin (24 woorden): die is nergens voor nodig."),
+    el("div", {class: "row"}, a2, coin, xp, ad, add));
+  const run = el("button", {class: "ghost"}, "Nu bijwerken");
+  run.addEventListener("click", () => post("crypto_sync", {}, run, "Crypto bijgewerkt"));
+  const L = C.last_run || {};
+  const lines = [];
+  if (L.bitvavo) lines.push(L.bitvavo.error ? `Bitvavo: ${L.bitvavo.error}` : L.bitvavo.skipped ? "" : `Bitvavo: ${L.bitvavo.new} nieuwe transacties` + ((L.bitvavo.differences || []).length ? ` · verschil met je saldo bij Bitvavo: ${L.bitvavo.differences.map(d => d.error || `${d.coin} ${d.at_bitvavo} vs ${d.from_transactions}`).join(", ")}` : " · saldo klopt"));
+  for (const w of ((L.wallets || {}).wallets || [])) lines.push(w.error ? `${w.account} ${w.coin}: ${w.error}` : `${w.account} ${w.coin}: ${w.quantity} (${w.value != null ? eur(w.value) : "nog geen koers"})`);
+  c.append(bv, wl, el("div", {class: "row", style: "margin-top:12px"}, run, el("span", {class: "muted small"}, L.at ? `laatst: ${L.at.replace("T", " ")}` : "nog niet gelopen")));
+  if (lines.filter(Boolean).length) c.append(el("div", {class: "small", style: "margin-top:6px"}, lines.filter(Boolean).map(x => el("div", {}, x))));
+  return c;
+}
+
 function vAssets(v) {
   const list = S.assets.filter(a => !["loan", "property"].includes(a.type));
   const c = el("div", {class: "card"}, el("h2", {}, "Beleggingen, pensioen en andere"), el("div", {class: "sub"}, "Waarde van je jaaroverzicht, de app van je verzekeraar of je broker. Rekeningen met live koersen hoef je niet bij te werken."));
@@ -179,6 +226,7 @@ function vAssets(v) {
   });
   c.append(el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Rekening"), el("th", {class: "num"}, "Waarde"), el("th", {class: "num"}, "Ingegeven"), el("th", {class: "num"}, "Inleg"), el("th", {}, "Nieuwe waarde"))), el("tbody", {}, rows)));
   v.append(c);
+  v.append(cryptoCard());
   if (S.missing_photo.length) {
     const p = el("div", {class: "card"}, el("h2", {}, "Koers op 31/12/2025 (fotomoment)"), el("div", {class: "sub"}, "Voor de meerwaardebelasting: de slotkoers per stuk in EUR, van het jaaroverzicht van je broker."));
     p.append(el("table", {}, el("tbody", {}, S.missing_photo.map(m => {
