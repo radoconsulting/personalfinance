@@ -253,34 +253,7 @@ function vPension(v) {
     }))) : el("div", {class: "muted"}, "Geen uitgaven boven € 1.000."));
   v.append(b);
 
-  const f = el("div", {class: "card"}, el("h2", {}, "Pensioenfiche inlezen"), el("div", {class: "sub"}, "De jaarlijkse fiche van je verzekeraar (PDF). centen zoekt de reserve, het verwachte kapitaal en de premie; je kijkt ze na voor je ze opslaat."));
-  const accSel = el("select", {"aria-label": "pensioenrekening"}, P.pension_accounts.map(n => el("option", {value: n}, n)));
-  const file = el("input", {type: "file", accept: ".pdf", hidden: true});
-  const out = el("div", {style: "margin-top:8px"});
-  const pick = el("button", {class: "ghost", onclick: () => file.click()}, "Kies de PDF");
-  file.addEventListener("change", async () => {
-    const fl = file.files[0]; if (!fl) return;
-    out.textContent = "Bezig…";
-    try {
-      const q = new URLSearchParams({kind: "pension", name: fl.name, account: accSel.value});
-      const r = await fetch("/api/upload?" + q, {method: "POST", headers: {"X-Centen-Key": KEY}, body: await fl.arrayBuffer()});
-      const j = await r.json(); if (!r.ok) throw new Error(j.error);
-      const fd = j.result.found || {};
-      out.textContent = "";
-      const res = inp("reserve", "reserve", fd.reserve ? fd.reserve.amount : ""), dd = inp("date", "datum", (fd.reserve && fd.reserve.date) || fd.statement_date || S.today, "date");
-      const ex = inp("expected", "verwacht kapitaal", fd.expected ? fd.expected.amount : ""), pm = inp("premium", "premie / jaar", fd.premium ? fd.premium.amount : "");
-      const ok = el("button", {class: "go"}, "Opslaan");
-      ok.addEventListener("click", () => post("pension_values", {account: accSel.value, reserve: res.value, date: dd.value, expected: ex.value, premium: pm.value}, ok, "Fiche verwerkt"));
-      const src = k => fd[k] ? el("div", {class: "muted small"}, "gevonden in: " + fd[k].line) : el("div", {class: "muted small"}, "niet gevonden: vul zelf in");
-      out.append(el("table", {}, el("tbody", {},
-        el("tr", {}, el("td", {}, "Reserve (waarde nu)"), el("td", {}, el("div", {class: "row"}, res, dd), src("reserve"))),
-        el("tr", {}, el("td", {}, `Verwacht kapitaal${fd.age ? " op " + fd.age + " jaar" : ""}`), el("td", {}, ex, src("expected"))),
-        el("tr", {}, el("td", {}, "Premie per jaar"), el("td", {}, pm, src("premium"))))), el("div", {class: "row", style: "margin-top:8px"}, ok));
-    } catch (e) { out.textContent = e.message; out.style.color = "var(--bad)"; }
-    file.value = "";
-  });
-  f.append(P.pension_accounts.length ? el("div", {class: "row"}, el("span", {class: "muted small"}, "Rekening"), accSel, pick, file) : el("div", {class: "muted"}, "Nog geen pensioenrekening: voeg ze toe onder Nieuwe rekening (soort Pensioen)."), out);
-  v.append(f);
+  v.append(pensionFicheCard());
 
   const T = P.tax;
   const mr = inp("municipal_rate", "gemeentebelasting %", T.municipal_rate != null ? Math.round(T.municipal_rate * 1000) / 10 : "");
@@ -312,6 +285,40 @@ function vLabel(v) {
   c.append(rows.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Handelaar"), el("th", {class: "num"}, "Aantal"), el("th", {class: "num"}, "Bedrag"), el("th", {}, "Voorstel"), el("th", {}, "Categorie"))), el("tbody", {}, rows))
     : el("div", {class: "muted"}, "Alles gelabeld."));
   v.append(c);
+}
+
+function pensionFicheCard() {
+  const f = el("div", {class: "card"}, el("h2", {}, "Pensioenfiche of mypension-certificaat"), el("div", {class: "sub"}, "De jaarlijkse fiche van je verzekeraar of het persoonlijk certificaat uit mypension.be (PDF). centen zoekt de reserve, het verwachte kapitaal en de premie; je kijkt ze na voor je ze opslaat."));
+  const accSel = el("select", {"aria-label": "pensioenrekening"}, ((S.pension || {}).pension_accounts || []).map(n => el("option", {value: n}, n)));
+  const file = el("input", {type: "file", accept: ".pdf", hidden: true});
+  const out = el("div", {style: "margin-top:8px"});
+  const pick = el("button", {class: "ghost", onclick: () => file.click()}, "Kies de PDF");
+  file.addEventListener("change", async () => {
+    const fl = file.files[0]; if (!fl) return;
+    out.textContent = "Bezig…";
+    try {
+      const q = new URLSearchParams({kind: "pension", name: fl.name, account: accSel.value});
+      const r = await fetch("/api/upload?" + q, {method: "POST", headers: {"X-Centen-Key": KEY}, body: await fl.arrayBuffer()});
+      const j = await r.json(); if (!r.ok) throw new Error(j.error);
+      const fd = j.result.found || {};
+      out.textContent = "";
+      const res = inp("reserve", "reserve", fd.reserve ? fd.reserve.amount : ""), dd = inp("date", "datum", (fd.reserve && fd.reserve.date) || fd.statement_date || S.today, "date");
+      const ex = inp("expected", "verwacht kapitaal", fd.expected ? fd.expected.amount : ""), pm = inp("premium", "premie / jaar", fd.premium ? fd.premium.amount : "");
+      const ok = el("button", {class: "go"}, "Opslaan");
+      ok.addEventListener("click", () => post("pension_values", {account: accSel.value, reserve: res.value, date: dd.value, expected: ex.value, premium: pm.value}, ok, "Fiche verwerkt"));
+      const older = j.result.newer_value;
+      if (older) out.append(el("div", {class: "small", style: "color:var(--warn,#b26b00);margin-bottom:6px"},
+        `Let op: je gaf op ${dL(older.date)} al een recentere waarde in (${eur(older.amount)}). De reserve van deze fiche wordt als oudere waarde bewaard; je huidige waarde blijft staan.`));
+      const src = k => fd[k] ? el("div", {class: "muted small"}, "gevonden in: " + fd[k].line) : el("div", {class: "muted small"}, "niet gevonden: vul zelf in");
+      out.append(el("table", {}, el("tbody", {},
+        el("tr", {}, el("td", {}, "Reserve (waarde nu)"), el("td", {}, el("div", {class: "row"}, res, dd), src("reserve"))),
+        el("tr", {}, el("td", {}, `Verwacht kapitaal${fd.age ? " op " + fd.age + " jaar" : ""}`), el("td", {}, ex, src("expected"))),
+        el("tr", {}, el("td", {}, "Premie per jaar"), el("td", {}, pm, src("premium"))))), el("div", {class: "row", style: "margin-top:8px"}, ok));
+    } catch (e) { out.textContent = e.message; out.style.color = "var(--bad)"; }
+    file.value = "";
+  });
+  f.append(((S.pension || {}).pension_accounts || []).length ? el("div", {class: "row"}, el("span", {class: "muted small"}, "Rekening"), accSel, pick, file) : el("div", {class: "muted"}, "Nog geen pensioenrekening: voeg ze toe onder Nieuwe rekening (soort Pensioen)."), out);
+  return f;
 }
 
 function vImport(v) {
@@ -346,6 +353,7 @@ function vImport(v) {
   };
   g.append(mk("broker", "Brokerexport", "DEGIRO (Transactions, Account, Portfolio — CSV of PDF), LYNX/IBKR-statement, Bitvavo-historiek. Al ingelezen rijen worden overgeslagen."),
     mk("bank", "Oudere bankhistoriek", "CSV, CAMT.053 (XML) of CODA van je bank, bv. KBC vóór augustus 2026. Wat de bankkoppeling al heeft, blijft onaangeroerd."));
+  g.append(pensionFicheCard());
   v.append(g, el("div", {class: "muted small"}, `Bestanden worden bewaard in ${S.imports_folder}\\uploads.`));
 }
 

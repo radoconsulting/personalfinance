@@ -570,6 +570,11 @@ def import_statement(conn, path: str | None = None, account: str | None = None, 
         name = None
     out = {"account": name, "found": found, "applied": False,
            "accounts": [a["name"] for a in accs]}
+    rd = (found.get("reserve") or {}).get("date") or found.get("statement_date")
+    if name and rd:
+        cur = AS._entries(conn, AS.find(conn, name)["id"], AS.VALUATION)
+        if cur and cur[-1][0][:10] > rd:
+            out["newer_value"] = {"date": cur[-1][0][:10], "amount": round(cur[-1][1], 2)}
     if not found:
         out["note"] = ("Niets herkend. Geef de bedragen zelf in (reserve, verwacht kapitaal, premie) of stuur de "
                        "tekst door.")

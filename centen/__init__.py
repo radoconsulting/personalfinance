@@ -1,2 +1,2 @@
 """centen: Personal Finance for Claude, for Belgian bank accounts."""
-__version__ = "0.20.2"
+__version__ = "0.20.3"
