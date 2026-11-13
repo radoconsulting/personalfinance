@@ -837,7 +837,9 @@ def position(conn, date_from: date | None = None, date_to: date | None = None, t
                       "brokers_not_added": at["not_added_net_deposited"], "property": at["property"],
                       "possessions": at.get("possessions"),
                       "loans": r2(-(at["loans_outstanding"] or 0)), "by_scope": {
+                          # a pension contract is yours, also when the company pays the premiums (r20)
                           s_: r2((cash.get(s_) or 0) + (at["by_scope"].get(s_) or 0)
+                                 + (at.get("business_pension") or 0) * (1 if s_ == "personal" else -1)
                                  - sum(a.get("outstanding") or 0 for a in asum["loans"] if a["scope"] == s_))
                           for s_ in ("personal", "business")},
                       "without_value": at["accounts_without_value"]},

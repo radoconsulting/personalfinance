@@ -58,10 +58,22 @@ def inputs(conn, today: date | None = None) -> dict:
                   "outstanding": x.get("outstanding_now")} for x in lo.get("loans", [])]
     birth = prof.get("birth_date")
     age = (today - date.fromisoformat(birth)).days / 365.25 if birth else None
+    # r20: the company's money as on the Totaal tab: its cash minus the VAT and corporate tax still owed, taken out
+    # at the dividend rate of the tax profile (VVPRbis 18 %, else 30 %)
+    owed, extraction = 0.0, DEFAULTS["company_extraction_tax"]
+    if tot.get("business"):
+        try:
+            from . import scopes
+            sb = scopes.split(conn, today)["business"]
+            if sb:
+                owed, extraction = sb["owed_estimate"] or 0.0, sb["payout_rate"]
+        except Exception:  # noqa: BLE001
+            pass
     return {
         "today": today.isoformat(), "age": round(age, 1) if age is not None else None, "birth_date": birth,
         "retirement_age": prof["retirement_age"], "live_until": prof.get("live_until", DEFAULTS["live_until"]),
-        "cash_personal": r2(tot.get("personal")), "cash_company": r2(tot.get("business")),
+        "cash_personal": r2(tot.get("personal")), "cash_company": r2((tot.get("business") or 0) - owed),
+        "company_tax_owed": r2(owed),
         "investments_personal": r2(personal_inv), "investments_company": r2(company_inv),
         "pension_capital_now": r2(p23_now), "pension_capital_at_retirement_today_eur": r2(p23_at_ret),
         "stop_work_age": prof.get("stop_work_age") or prof["retirement_age"],
@@ -75,12 +87,13 @@ def inputs(conn, today: date | None = None) -> dict:
         "one_offs_added_back_monthly": r2(offs_saving), "one_offs": sp["one_offs"],
         "loans": loan_list, "return": DEFAULTS["return"], "inflation": prof.get("inflation", DEFAULTS["inflation"]),
         "withdrawal_rate": prof.get("withdrawal_rate", DEFAULTS["withdrawal_rate"]),
-        "company_extraction_tax": DEFAULTS["company_extraction_tax"], "include_company": True,
+        "company_extraction_tax": extraction, "include_company": True,
         "notes": "monthly_saving = income − spending of the last 12 complete months for you and the company together "
                  "(cash basis, before money put into investments, one-off purchases added back). annual_spending = "
                  "your personal spending profile (last 12 months without one-offs, or your own figure), loan "
                  "instalments included. Pension capital (pillars 2/3) is counted from the "
-                 "pension date, after tax. Company money counts after the extraction tax.",
+                 "pension date, after tax. Company money (its cash minus the VAT and corporate tax still owed, plus its "
+                 "investments) counts after the dividend withholding of your tax profile (VVPRbis 18 %, else 30 %).",
     }
 
 

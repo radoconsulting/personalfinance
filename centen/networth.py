@@ -55,7 +55,8 @@ def snapshot(conn, today: date | None = None, position: dict | None = None) -> d
            "property": r2((nw.get("property") or 0) + (nw.get("possessions") or 0)), "loans": r2(abs(nw.get("loans") or 0)), "total": r2(nw.get("total"))}
     conn.execute("INSERT OR REPLACE INTO networth_snapshots(date, source, cash_personal, cash_business, investments, "
                  "property, loans, total, parts_json) VALUES (?,?,?,?,?,?,?,?,?)",
-                 (*row.values(), json.dumps(nw, default=str)))
+                 (*row.values(), json.dumps({**nw, "business_other": r2((nw.get("by_scope") or {}).get("business", 0)
+                                                                       - (cash.get("business") or 0))}, default=str)))
     conn.commit()
     return row
 
@@ -183,12 +184,14 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
 
     inv = defaultdict(dict)       # account name -> {date: value}
     other = {"property": defaultdict(float), "loans": defaultdict(float)}
+    biz_other = defaultdict(float)  # r20: property/possessions minus loans of company accounts
     missing_prices = set()
     walls = {}                    # crypto moved out: e -> key -> qty
     backcast = {}                 # accounts valued before their first entered value: name -> date of that value
     left_out = {}                 # accounts with no history at all before the bank data starts
     home_back = {}                # property counted at its first value before that value's date
     accs = list(conn.execute("SELECT * FROM accounts WHERE source='asset'"))
+    biz_names = {a["name"] for a in accs if a["scope"] == "business" and a["account_type"] != "pension"}
     for a in accs:
         typ = a["account_type"]
         fl, src = AS.contribution_flows(conn, a["id"])
@@ -256,6 +259,8 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
                 v = LN.balance_at(conn, a["id"], e, plan)
                 if v:
                     other["loans"][e] += v
+                    if a["scope"] == "business":
+                        biz_other[e] -= v
                 continue
             if typ == "property" and vals and e < date.fromisoformat(vals[0][0][:10]) and home_since and \
                     e.isoformat() >= home_since:
@@ -270,6 +275,8 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
                 if v is None:
                     continue
                 other["loans" if typ == "loan" else "property"][e] += abs(v)
+                if a["scope"] == "business":
+                    biz_other[e] += -abs(v) if typ == "loan" else abs(v)
                 continue
             first_val = date.fromisoformat(vals[0][0][:10]) if vals else None
             if first_val and e >= first_val:
@@ -310,7 +317,8 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
         parts = {"accounts": {n: r2(s.get(e)) for n, s in inv.items() if s.get(e)}, "estimated_accounts": est,
                  "not_counted": sorted(n for n in left_out if e not in (inv.get(n) or {})),
                  "at_contributions": sorted(n for n in left_out if e.isoformat()[:7] < (bank_first or "")[:7]
-                                            and e in (inv.get(n) or {}))}
+                                            and e in (inv.get(n) or {})),
+                 "business_other": r2(biz_other.get(e, 0.0) + sum((inv.get(n) or {}).get(e, 0.0) for n in biz_names))}
         if e in bank_set:
             cp = sum(s.get(e, 0.0) for k, s in bank.items() if scopes[k] == "personal")
             cb = sum(s.get(e, 0.0) for k, s in bank.items() if scopes[k] == "business")
@@ -365,8 +373,20 @@ def timeline(conn, months: int | None = None) -> dict:
             pt["by_account"] = pj.get("accounts") or {}
             pt["not_counted"] = pj.get("not_counted") or []
             pt["at_contributions"] = pj.get("at_contributions") or []
-            if pj.get("no_bank_data"):
-                pt["no_bank_data"] = True
+        else:
+            try:
+                pj = json.loads(pts[m]["parts_json"] or "{}")
+            except ValueError:
+                pj = {}
+        if pj.get("no_bank_data"):
+            pt["no_bank_data"] = True
+        # r20: private and company apart (the company part: its cash plus what else its accounts hold)
+        bo = pj.get("business_other")
+        if bo is None and (pj.get("by_scope") or {}).get("business") is not None:
+            bo = pj["by_scope"]["business"] - (pt["cash_business"] or 0)
+        if pt["total"] is not None and pt["cash_business"] is not None:
+            pt["business"] = r2(pt["cash_business"] + (bo or 0))
+            pt["personal"] = r2(pt["total"] - pt["business"])
         points.append(pt)
     meta = get_meta(conn, "networth_reconstructed")
     info = json.loads(meta) if meta else {}

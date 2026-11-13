@@ -114,6 +114,9 @@ table.t td { padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-al
 table.t td.num, table.t th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.t tr:last-child td { border-bottom: 0; }
 .muted { color: var(--muted); } .sec-text { color: var(--text-2); }
+.chip.scope.bv { background: color-mix(in srgb, var(--s6) 22%, transparent); }
+.chip.scope.pv { background: color-mix(in srgb, var(--s1) 22%, transparent); }
+.sec .chip.scope { font-weight: 500; vertical-align: 2px; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 8px; border-radius: 99px;
   border: 1px solid var(--ring); color: var(--text-2); white-space: nowrap; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
@@ -522,16 +525,23 @@ function alertItems(scope) {
     if (a.type === "price_increase" && a.facts) d = `${nlName(a.merchant)}: ${eur(a.facts.from)} → ${eur(a.facts.to)} (${CADENCE[a.facts.cadence] || a.facts.cadence}) sinds ${dLabel(a.facts.since)}, ±${eur(a.facts.per_year)} per jaar meer`;
     if (a.type === "higher_than_usual" && a.facts) d += ` · ${num1.format(a.facts.ratio)}× je gebruikelijke ${eur(a.facts.usual)}`;
     if (a.type === "possible_duplicate" && a.facts) d += ` · ${a.facts.count}× hetzelfde bedrag`;
-    return statusAlert(a.severity === "warning" ? "warning" : "info", T[a.type] || a.type, d, a.amount);
+    const n = statusAlert(a.severity === "warning" ? "warning" : "info", T[a.type] || a.type, d, a.amount);
+    if (!scope && HAS_BV) scopeChip(n, a.scope);
+    return n;
   });
+}
+function scopeChip(node, scope) {
+  const tt = node.querySelector(".tt");
+  if (tt) tt.append(el("span", {class: "chip scope " + (scope === "business" ? "bv" : "pv"), style: "margin-left:8px"}, scope === "business" ? "BV" : "Privé"));
+  return node;
 }
 function taxCheck() {
   const out = [];
   const y = String(new Date(D.meta.today).getFullYear());
   const p = D.periods[y];
   if (p && p.business.result_before_corporate_tax > 0 && p.business.corporate_tax_paid === 0) {
-    out.push(statusAlert("serious", `Geen voorafbetaling vennootschapsbelasting in ${y}`,
-      `Kasresultaat BV tot nu ${eur(p.business.result_before_corporate_tax)} (vóór VenB). Te bespreken met je boekhouder vóór de laatste voorafbetaling.`, null));
+    out.push(scopeChip(statusAlert("serious", `Geen voorafbetaling vennootschapsbelasting in ${y}`,
+      `Kasresultaat BV tot nu ${eur(p.business.result_before_corporate_tax)} (vóór VenB). Te bespreken met je boekhouder vóór de laatste voorafbetaling.`, null), "business"));
   }
   const exp = D.links.filter(l => l.status === "active" && l.days_left != null && l.days_left <= 30);
   for (const l of exp) out.push(statusAlert("warning", `Toestemming ${l.bank} verloopt binnenkort`, `Nog ${l.days_left} dagen (tot ${dLabel(l.valid_until)}): opnieuw koppelen met centen link.`, null));
@@ -572,46 +582,83 @@ function investTotal() { const T = D.investments.totals; return (T.investments_v
 function viewTotal(v) {
   const p = P(), latest = D.periods[D.meta.default_period];
   const cash = latest.cash, T = D.investments.totals, L = D.investments.loans;
+  const S = X("scopes"), SP = S && S.personal, SB = S && S.business;
   const valued = D.investments.accounts.filter(a => a.value != null && a.type !== "property").length;
-  v.append(el("h2", {class: "sec"}, "Stand vandaag"));
-  v.append(el("div", {class: "grid g4"},
-    el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Vermogen"), el("div", {class: "val"}, eur(D.net_worth.total)),
-      el("div", {class: "sub"}, netWorthSub())),
-    tile("Liquide privé", eur(cash.personal), cashSub("personal")),
-    tile("Liquide BV", eur(cash.business), cashSub("business")),
-  ));
-  v.append(el("div", {class: "grid g4", style: "margin-top:14px"},
-    tile("Beleggingen", eur(investTotal()), (() => { const PT = (D.investments.portfolio || {}).totals || {}; return PT.day_change != null ? `vandaag ${eurS(PT.day_change)} · live ${PT.prices_as_of.slice(11, 16)} · ` : ""; })() + (valued ? `${valued} rekening${valued > 1 ? "en" : ""} met waarde` + (NOT_ADDED.length ? ` + inleg ${NOT_ADDED.slice(0, 3).join(", ")}` : "")
-      : `netto inleg · ${brokerList()}`)),
-    T.gain_on_valued_accounts != null ? tile("Rendement", eurS(T.gain_on_valued_accounts), `${pctS(T.gain_pct)} · waarde − inleg, op rekeningen met waarde`)
-      : tile("Rendement", "nog geen waarde", "geef de waarde van een beleggingsrekening in", "placeholder"),
-    L.length ? tile("Leningen", eur(T.loans_outstanding), "nog te betalen" + (D.loans.length ? ` · ${eur(D.loans.reduce((a, l) => a + l.monthly, 0))} / maand` : ""))
-      : tile("Lening", D.loans.length ? eur(D.loans.reduce((a, l) => a + l.monthly, 0)) + " / maand" : "—", D.loans.map(l => nlName(l.lender)).join(", ") || "geen gevonden"),
-    (() => { const PO = D.possessions; return PO && !PO.error && PO.items.length
-      ? tile("Bezittingen", eur(PO.total), PO.home.value ? `woning ${eur(PO.home.value)} · andere ${eur(PO.without_home)}` : Object.entries(PO.by_kind).map(([k, x]) => `${k.toLowerCase()} ${eur(x)}`).join(" · "))
-      : tile("Bezittingen", "—", "woning, wagen, horloge…: voeg ze toe in de bijwerk-app", "placeholder"); })(),
-  ));
-  const comp = compositionParts();
-  if (comp.length > 1) {
-    const cc = card("Waar zit je vermogen", `Samen ${eur(D.net_worth.total)} · leningen afgetrokken van je woning en bezittingen`, {table: () => table([
-      {label: "Deel", get: r => r.label}, {label: "Bedrag", num: true, get: r => eur(r.value)}, {label: "Aandeel", num: true, get: r => pct(r.value / D.net_worth.total)}], comp)});
-    cc.root.style.marginTop = "14px";
-    v.append(cc.root);
-    requestAnimationFrame(() => segmented(cc.body, comp));
+  const investSub = () => { const PT = (D.investments.portfolio || {}).totals || {}; return (PT.day_change != null ? `vandaag ${eurS(PT.day_change)} · live ${PT.prices_as_of.slice(11, 16)} · ` : "") + (valued ? `${valued} rekening${valued > 1 ? "en" : ""} met waarde` + (NOT_ADDED.length ? ` + inleg ${NOT_ADDED.slice(0, 3).join(", ")}` : "")
+      : `netto inleg · ${brokerList()}`); };
+  const loanTile = () => L.length ? tile("Leningen", eur(SP ? SP.loans : T.loans_outstanding), "nog te betalen" + (D.loans.length ? ` · ${eur(D.loans.reduce((a, l) => a + l.monthly, 0))} / maand` : ""))
+      : tile("Lening", D.loans.length ? eur(D.loans.reduce((a, l) => a + l.monthly, 0)) + " / maand" : "—", D.loans.map(l => nlName(l.lender)).join(", ") || "geen gevonden");
+  const possTile = () => { const PO = D.possessions; return PO && !PO.error && PO.items.length
+      ? tile("Woning en bezittingen", eur(PO.total), PO.home.value ? `woning ${eur(PO.home.value)} · andere ${eur(PO.without_home)}` : Object.entries(PO.by_kind).map(([k, x]) => `${k.toLowerCase()} ${eur(x)}`).join(" · "))
+      : tile("Bezittingen", "—", "woning, wagen, horloge…: voeg ze toe in de bijwerk-app", "placeholder"); };
+  if (!SP) {  // without the split (an error): the combined view as before
+    v.append(el("h2", {class: "sec"}, "Stand vandaag"));
+    v.append(el("div", {class: "grid g4"},
+      el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Vermogen"), el("div", {class: "val"}, eur(D.net_worth.total)),
+        el("div", {class: "sub"}, netWorthSub())),
+      tile("Liquide privé", eur(cash.personal), cashSub("personal")),
+      tile("Liquide BV", eur(cash.business), cashSub("business"))));
+    v.append(el("div", {class: "grid g4", style: "margin-top:14px"}, tile("Beleggingen", eur(investTotal()), investSub()),
+      T.gain_on_valued_accounts != null ? tile("Rendement", eurS(T.gain_on_valued_accounts), `${pctS(T.gain_pct)} · waarde − inleg`) : tile("Rendement", "nog geen waarde", "geef de waarde van een beleggingsrekening in", "placeholder"),
+      loanTile(), possTile()));
+  } else {
+    // --- privé: van jou ---
+    v.append(el("h2", {class: "sec"}, "Privé ", el("span", {class: "chip scope pv"}, "van jou")));
+    v.append(el("div", {class: "grid g4"},
+      el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Vrij beschikbaar"), el("div", {class: "val"}, eur(SP.available_now)),
+        el("div", {class: "sub"}, `liquide ${eur(SP.cash)} + beleggingen ${eur(SP.investments)} · wat je kan uitgeven of verkopen zonder de BV`)),
+      tile("Privévermogen", eur(SP.net_worth), `vrij ${eur(SP.available_now)} · pensioen ${eur(SP.locked)} · woning en bezittingen − leningen ${eur(SP.owned)}`),
+      tile("Liquide privé", eur(SP.cash), cashSub("personal"))));
+    v.append(el("div", {class: "grid g4", style: "margin-top:14px"},
+      tile("Beleggingen privé", eur(SP.investments), investSub()),
+      tile("Pensioen", eur(SP.pension), SP.pension ? "vast tot je pensioendatum · ook als de BV de premie betaalt" : "geen pensioencontract ingegeven", SP.pension ? "" : "placeholder"),
+      possTile(), loanTile()));
+    const pc = [
+      {label: "Liquide", value: SP.cash, color: "var(--s1)"}, {label: "Beleggingen", value: SP.investments, color: "var(--s2)"},
+      {label: "Pensioen (vast)", value: SP.pension, color: "var(--s3)", dark: true},
+      {label: "Woning en bezittingen − leningen", value: SP.owned, color: "var(--s4)", dark: true}].filter(x => x.value > 0.5);
+    if (pc.length > 1) {
+      const cc = card("Waar zit je privévermogen", `${eur(SP.net_worth)} · leningen afgetrokken van je woning en bezittingen`, {table: () => table([
+        {label: "Deel", get: r => r.label}, {label: "Bedrag", num: true, get: r => eur(r.value)}, {label: "Aandeel", num: true, get: r => pct(r.value / SP.net_worth)}], pc)});
+      cc.root.style.marginTop = "14px";
+      v.append(cc.root);
+      requestAnimationFrame(() => segmented(cc.body, pc));
+    }
+    // --- BV: van de vennootschap ---
+    if (SB) {
+      const vat = SB.vat_due || {}, cit = SB.corporate_tax_due || {};
+      v.append(el("h2", {class: "sec", style: "margin-top:22px"}, "BV ", el("span", {class: "chip scope bv"}, "van de vennootschap, niet vrij te besteden")));
+      v.append(el("div", {class: "grid g4"},
+        tile("Liquide BV", eur(SB.cash), cashSub("business")),
+        tile("Nog te betalen (schatting)", eur(SB.owed_estimate), `btw ${eur(vat.amount)} sinds ${dLabel(vat.since)} · VenB ${cit.year} ${eur(cit.amount)} na ${eur(cit.prepaid)} voorafbetaald`),
+        tile("Vrij in de BV", eur(SB.net_worth), (SB.investments ? `liquide na btw en VenB + beleggingen ${eur(SB.investments)}` : "liquide na btw en VenB") + " · blijft van de vennootschap"),
+        tile("Netto voor jou bij uitkering", eur(SB.net_to_you), `als ${SB.payout_route === "VVPRbis" ? "VVPRbis-dividend" : "gewoon dividend"} na ${pct(SB.payout_rate)} roerende voorheffing · pas beschikbaar na een uitkering`)));
+      const bc = [
+        {label: "Btw en VenB nog te betalen", value: SB.owed_estimate, color: "var(--s5)", dark: true},
+        {label: "Roerende voorheffing bij uitkering", value: Math.max(0, SB.net_worth) - SB.net_to_you, color: "var(--s3)", dark: true},
+        {label: "Netto voor jou", value: SB.net_to_you, color: "var(--s6)", dark: true}].filter(x => x.value > 0.5);
+      const bcc = card("Wat er van het geld in de BV bij jou kan komen", `Van ${eur(SB.cash + SB.investments)} in de BV`, {table: () => table([
+        {label: "Deel", get: r => r.label}, {label: "Bedrag", num: true, get: r => eur(r.value)}], bc)});
+      bcc.root.style.marginTop = "14px";
+      v.append(bcc.root);
+      requestAnimationFrame(() => segmented(bcc.body, bc));
+    }
+    v.append(el("div", {class: "note", style: "margin-top:10px"},
+      `Samen ${eur(S.total)}: privé ${eur(SP.net_worth)}` + (SB ? ` + BV ${eur(SB.net_worth)} (na geschatte btw en VenB, vóór roerende voorheffing).` : ".") + " " + S.notes));
   }
   if (D.networth_history) { const nw = networthCard(""); nw.root.style.marginTop = "14px"; v.append(nw.root); }
   v.append(el("h2", {class: "sec"}, `In ${p.label.toLowerCase()}`));
   const net = p.personal.income - p.personal.spending;
   v.append(el("div", {class: "grid g4"},
-    tile("Resultaat BV vóór VenB", eur(p.business.result_before_corporate_tax), `omzet ${eur(p.business.revenue_incl_vat)} incl. btw`),
-    tile("Van de BV naar jou", eur(p.company_to_you.total), `bezoldiging ${eur(p.company_to_you.net_salary)} · dividend ${eur(p.company_to_you.dividends_net)}` + (p.company_to_you.into_your_pension ? ` · pensioen ${eur(p.company_to_you.into_your_pension)}` : "")),
-    tile("Gezin: inkomen − uitgaven", eurS(net), `inkomen ${eur(p.personal.income)} · uitgaven ${eur(p.personal.spending)}`),
-    tile("Netto naar beleggingen", eur(p.personal.net_put_into_investments), "in deze periode"),
+    tile("Privé: inkomen − uitgaven", eurS(net), `inkomen ${eur(p.personal.income)} · uitgaven ${eur(p.personal.spending)}`),
+    tile("Privé: netto naar beleggingen", eur(p.personal.net_put_into_investments), "in deze periode"),
+    HAS_BV ? tile("Van de BV naar jou", eur(p.company_to_you.total), `bezoldiging ${eur(p.company_to_you.net_salary)} · dividend ${eur(p.company_to_you.dividends_net)}` + (p.company_to_you.into_your_pension ? ` · pensioen ${eur(p.company_to_you.into_your_pension)}` : "") + " · telt in je privé-inkomen") : null,
+    HAS_BV ? tile("BV: resultaat vóór VenB", eur(p.business.result_before_corporate_tax), `omzet ${eur(p.business.revenue_incl_vat)} incl. btw · blijft in de BV`) : null,
   ));
-  const ms = monthly("total");
-  const c = card("Inkomen en uitgaven per maand · totaal", "Privé + BV samen; geldverkeer tussen BV en jou telt één keer" + partialNote(ms), {
+  const ms = monthly("personal");
+  const c = card("Privé: inkomen en uitgaven per maand", "Wat binnenkomt op je privé- en gedeelde rekeningen (ook loon en dividend uit de BV) en wat je uitgeeft" + partialNote(ms), {
     table: () => table([{label: "Maand", get: mRow}, {label: "Inkomen", num: true, get: r => eur(r.income)},
-      {label: "Uitgaven", num: true, get: r => eur(r.spending)}, {label: "Netto", num: true, get: r => eurS(r.net)}], ms)});
+      {label: "Uitgaven", num: true, get: r => eur(r.spending)}, {label: "Netto", num: true, get: r => eurS(r.income - r.spending)}], ms)});
   const g = el("div", {class: "grid g3", style: "margin-top:14px;align-items:start"});
   c.root.classList.add("span2");
   g.append(c.root);
@@ -983,8 +1030,9 @@ function copyText(txt, btn) {
 
 function networthCard(cls) {
   const H = X("networth_history");
-  const c = card("Vermogen over tijd", "Per maandeinde, gereconstrueerd uit bankhistoriek, brokerexports en maandkoersen; vanaf nu elke dag een momentopname", {cls,
+  const c = card(HAS_BV ? "Vermogen over tijd · privé en BV apart" : "Vermogen over tijd", "Per maandeinde, gereconstrueerd uit bankhistoriek, brokerexports en maandkoersen; vanaf nu elke dag een momentopname", {cls,
     table: () => table([{label: "Datum", get: r => dLabel(r.date)}, {label: "Vermogen", num: true, get: r => eur(r.total)},
+      ...(HAS_BV ? [{label: "Privé", num: true, get: r => r.personal == null ? "—" : eur(r.personal)}, {label: "BV", num: true, get: r => r.business == null ? "—" : eur(r.business)}] : []),
       {label: "Liquide", num: true, get: r => r.cash_personal == null && r.cash_business == null ? "—" : eur((r.cash_personal || 0) + (r.cash_business || 0))}, {label: "Beleggingen", num: true, get: r => eur(r.investments)},
       {label: "Leningen", num: true, get: r => r.loans ? "−" + eur(r.loans) : "—"},
       {label: "", get: r => r.source === "live" ? el("span", {class: "chip"}, "momentopname") : (r.carried_back && r.carried_back.length ? el("span", {class: "chip", title: "Saldo vóór de start van de bankhistoriek aangehouden: " + r.carried_back.join(", ")}, "geschat") : "")}],
@@ -1002,9 +1050,15 @@ function networthCard(cls) {
   const ac = [...new Set(pts.flatMap(p => p.at_contributions || []))];
   if (ac.length) facts.push(`${ac.join(", ")}: vóór ${dLabel(H.total_from)} geteld aan de ingegeven inleg (geen historische waarde)`);
   if (est.length) facts.push(`${est.length} maanden geschat (${[...new Set(est.flatMap(p => p.carried_back))].join(", ")}: saldo vóór de bankhistoriek aangehouden)`);
+  const split = HAS_BV && pts.some(p => p.business != null);
+  if (split) facts.unshift("BV inclusief de btw en VenB die ze nog moet betalen (die schatting staat enkel in de stand van vandaag)");
   const host = el("div");
   c.body.append(host, facts.length ? el("div", {class: "note", style: "margin-top:6px"}, facts.join(" · ")) : null);
-  requestAnimationFrame(() => lineChart(host, {labels: pts.map(p => p.date.slice(0, 7)), series: [
+  requestAnimationFrame(() => lineChart(host, {labels: pts.map(p => p.date.slice(0, 7)), series: split ? [
+    {name: "Privé", values: pts.map(p => p.personal), color: SERIES[0]},
+    {name: "BV", values: pts.map(p => p.business), color: "var(--s6)"},
+    {name: "Samen", values: pts.map(p => p.total), color: "var(--s7)"},
+    ...(pts.some(p => p.property) ? [{name: "Bezittingen − leningen", values: pts.map(p => p.property ? p.property - (p.loans || 0) : null), color: SERIES[3]}] : [])] : [
     {name: "Vermogen", values: pts.map(p => p.total), color: SERIES[0]},
     {name: "Beleggingen", values: pts.map(p => p.investments), color: SERIES[2]},
     {name: "Liquide", values: pts.map(p => p.cash_personal == null && p.cash_business == null ? null : (p.cash_personal || 0) + (p.cash_business || 0)), color: SERIES[1]},
@@ -1664,7 +1718,7 @@ function viewPlanner(v) {
   g.append(cs.root);
   g.append(notesCard("Vertrekpunt (uit je gegevens)", [
     `Leeftijd ${I.age != null ? Math.floor(I.age) : "onbekend (geboortedatum in het pensioenprofiel)"} · ${I.stop_work_age < I.retirement_age ? "stoppen met werken op " + I.stop_work_age + " · " : ""}pensioen op ${I.retirement_age} · wettelijk pensioen ${I.legal_pension_monthly != null ? eur(I.legal_pension_monthly) + " / maand" : "niet ingevuld"}.`,
-    `Cash privé ${eur(I.cash_personal)}, beleggingen privé ${eur(I.investments_personal)}` + (I.include_company ? `, BV ${eur((I.cash_company || 0) + (I.investments_company || 0))} (telt na ${pct(I.company_extraction_tax)} belasting bij uitkeren)` : "") + ".",
+    `Cash privé ${eur(I.cash_personal)}, beleggingen privé ${eur(I.investments_personal)}` + (I.include_company ? `, BV ${eur((I.cash_company || 0) + (I.investments_company || 0))}` + (I.company_tax_owed ? ` na ${eur(I.company_tax_owed)} nog te betalen btw en VenB` : "") + ` (niet vrij: telt pas na ${pct(I.company_extraction_tax)} roerende voorheffing bij uitkeren)` : "") + ".",
     `Pensioenkapitaal 2e/3e pijler nu ${eur(I.pension_capital_now)}; vanaf je pensioen na belasting, met premies zolang je werkt (de schuif ‘stoppen’ telt mee).`,
     "Sparen en extra sparen lopen enkel zolang je werkt; daarna leef je van je vermogen tot je pensioen.",
     `Sparen ${eur(I.monthly_saving)} per maand (inkomen − uitgaven, privé + BV, laatste 12 maanden) · uitgaven ${eur(I.annual_spending)} per jaar.`,

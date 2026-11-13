@@ -161,7 +161,7 @@ def _r17(conn, today: date) -> dict:
         f["events_next_60_days"] = f["events_next_60_days"][:80]
         return f
 
-    from . import depreciation, possessions, prepay, remuneration
+    from . import depreciation, possessions, prepay, remuneration, scopes
 
     def remun():
         r = remuneration.compare(conn, today)
@@ -172,7 +172,8 @@ def _r17(conn, today: date) -> dict:
             "remuneration": _safe(remun), "prepay": _safe(lambda: {"loans": prepay.loans_for_calc(conn, today),
                                                                    "fee_months": prepay.FEE_MONTHS}),
             "vehicles": _safe(depreciation.list_all, conn, today),
-            "possessions": _safe(possessions.overview, conn, today)}
+            "possessions": _safe(possessions.overview, conn, today),
+            "scopes": _safe(scopes.split, conn, today)}
 
 
 def render(data: dict) -> str:

@@ -595,6 +595,7 @@ def summary(conn, today: date | None = None) -> dict:
         "not_added_net_deposited": r2(un_pos),
         "by_type": {k: r2(v) for k, v in by_type.items()},
         "by_scope": {k: r2(v) for k, v in by_scope.items()},
+        "business_pension": r2(sum(counted_value(a) for a in inv if a["type"] == "pension" and a["scope"] == "business")),
         "oldest_value": min((a["value_entered"]["date"] for a in values), default=None),
         "accounts_without_value": [a["name"] for a in inv + prop + things + loans if not a.get("value_entered")],
     }
