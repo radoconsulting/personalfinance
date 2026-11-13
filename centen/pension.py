@@ -420,7 +420,7 @@ _DATE = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
 _KINDS = {
     "reserve": (re.compile(r"verworven\s+reserve|r[eé]serves?\s+acquises?|opgebouwde\s+reserve|reserve\s+op|"
                            r"theoretische\s+afkoopwaarde|afkoopwaarde|valeur\s+de\s+rachat", re.I), 2),
-    "expected": (re.compile(r"te\s+verwachten|verwachte\s+(?:prestatie|kapitaal|pensioen)|geraamde?\s+(?:prestatie|"
+    "expected": (re.compile(r"te\s+verwachten|verwachte?\s+(?:prestatie|kapitaal|pensioen|reserves?\s+op)|geraamde?\s+(?:prestatie|"
                             r"kapitaal)|raming|prestations?\s+attendues?|estimation|kapitaal\s+op\s+(?:de\s+)?"
                             r"pensioen|op\s+(?:de\s+)?(?:pensioen|eind)(?:datum|leeftijd)", re.I), 2),
     "premium": (re.compile(r"(?:jaar|jaarlijkse|totale|betaalde|gestorte)\s*premie|premie\s+(?:per\s+jaar|van\s+het\s+"
@@ -428,7 +428,22 @@ _KINDS = {
 }
 
 
+def _amounts(s: str) -> list[float]:
+    s = _DATE.sub(" ", s)  # a date (10.09.2024) is not an amount
+    s = re.sub(r"\(\d{1,2}\)", " ", s)  # footnote marks: 26.634,80(1)
+    out = []
+    for m in _AMOUNT.findall(s):
+        try:
+            v = float(m.replace(" ", "").replace("\u202f", "").replace("\xa0", "").replace(".", "").replace(",", "."))
+        except ValueError:
+            continue
+        if v >= 10:
+            out.append(v)
+    return out
+
+
 def _amount(s: str) -> float | None:
+    s = re.sub(r"\(\d{1,2}\)", " ", _DATE.sub(" ", s))
     m = _AMOUNT.findall(s)
     if not m:
         return None
@@ -438,6 +453,65 @@ def _amount(s: str) -> float | None:
     except ValueError:
         return None
     return v if v >= 10 else None
+
+
+def _iso(d) -> str:
+    return f"{d.group(3)}-{int(d.group(2)):02d}-{int(d.group(1)):02d}"
+
+
+def _nn_style(lines: list[str], found: dict, today: date | None = None) -> None:
+    """Certificates (NN and others) that list the reserve as a table per fund with a total, the expected capital as
+    several projections on one line, and the premium per period split into pension and cover parts."""
+    today = today or date.today()
+    # reserve: a heading without an amount, a table, then "Totaal: x"
+    for i, ln in enumerate(lines):
+        if _KINDS["reserve"][0].search(ln) and not _amounts(ln) and not re.search(r"projectie|verwacht", ln, re.I):
+            for j in range(i + 1, min(i + 25, len(lines))):
+                if re.match(r"(?:totaal|total)\b", lines[j], re.I) and _amounts(lines[j]):
+                    d = _DATE.search(ln)
+                    cur = found.get("reserve")
+                    if not cur or cur["amount"] < _amounts(lines[j])[-1]:
+                        found["reserve"] = {"amount": round(_amounts(lines[j])[-1], 2), "line": ln[:160] + " / " + lines[j][:80],
+                                            "date": _iso(d) if d else None}
+                    break
+            if found.get("reserve"):
+                break
+    # expected: three projections (0 % / realistic / optimistic) on one line → the middle one
+    for ln in lines:
+        if _KINDS["expected"][0].search(ln):
+            a = _amounts(ln)
+            if len(a) >= 3:
+                d = _DATE.search(ln)
+                found["expected"] = {"amount": round(a[len(a) // 2], 2), "line": ln[:160] + " (middelste projectie)",
+                                     "date": _iso(d) if d else None}
+                break
+    # premium: "Jaarlijkse premies van A tot B" blocks → the one running now, its pension part
+    blocks = []
+    for i, ln in enumerate(lines):
+        m = re.search(r"jaarlijkse\s+premies?\s+van\s+(\S+)\s+tot\s+(\S+)", ln, re.I)
+        if not m:
+            continue
+        d1, d2 = _DATE.search(m.group(1)), _DATE.search(m.group(2))
+        if not d1:
+            continue
+        part = total = None
+        for j in range(i + 1, min(i + 8, len(lines))):
+            if re.match(r"(?:jaarlijkse|eenmalige)\s+premie", lines[j], re.I):
+                break
+            a = _amounts(lines[j])
+            if a and re.search(r"pensioen", lines[j], re.I) and part is None:
+                part = a[-1]
+            if a and re.match(r"totaal", lines[j], re.I):
+                total = a[-1]
+                break
+        if part or total:
+            blocks.append((_iso(d1), _iso(d2) if d2 else "9999-12-31", part or total, ln))
+    if blocks:
+        t = today.isoformat()
+        cur = [b for b in blocks if b[0] <= t] or blocks
+        b = max(cur, key=lambda x: x[0])
+        found["premium"] = {"amount": round(b[2], 2), "line": b[3][:160] + " (pensioendeel, zonder dekkingen)",
+                            "date": b[0]}
 
 
 def parse_statement_text(text: str) -> dict:
@@ -455,10 +529,14 @@ def parse_statement_text(text: str) -> dict:
                     found[kind] = {"amount": round(v, 2), "line": ln[:160] + ("" if j == i else " / " + lines[j][:80]),
                                    "date": f"{d.group(3)}-{int(d.group(2)):02d}-{int(d.group(1)):02d}" if d else None}
                     break
+    _nn_style(lines, found)
     age = re.search(r"(?:pensioen|eind)?leeftijd\s+(?:van\s+)?(\d{2})\s*jaar|op\s+(\d{2})\s*jaar|à\s+(\d{2})\s*ans",
                     text, re.I)
     if age:
         found["age"] = int(next(g for g in age.groups() if g))
+    ea = re.search(r"\((\d{2})\s*jaar\)", (found.get("expected") or {}).get("line", ""))
+    if ea:  # the age on the line of the expected capital wins over one elsewhere (another contract's end age)
+        found["age"] = int(ea.group(1))
     d = re.search(r"(?:situatie|toestand|stand|op datum van|situation)\s+(?:op|au|van)?\s*(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})",
                   text, re.I)
     if d:

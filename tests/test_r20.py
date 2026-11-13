@@ -56,3 +56,40 @@ def test_history_split(conn):
     pts = [p for p in networth.timeline(conn)["points"] if p["total"] is not None]
     assert pts and all(p["personal"] + p["business"] == pytest.approx(p["total"], abs=0.05) for p in pts)
     assert pts[-1]["business"] == pytest.approx(pts[-1]["cash_business"], abs=0.05)  # the demo BV holds only cash
+
+
+NN_CERT = """Uitgiftedatum: 10.09.2024
+Een te verwachten kapitaal op pensioenleeftijd.
+Premies (EUR)(1)
+Eenmalige premie op 01.10.2021
+• Pensioen/overlijden: 5.945,00
+Totaal: 6.688,64
+Jaarlijkse premies van 01.10.2022 tot 01.10.2023
+• Pensioen/overlijden: 4.500,00
+• Arbeidsongeschiktheid: 741,22
+Totaal: 5.359,07
+Jaarlijkse premies van 01.10.2024 tot 01.10.2053
+• Pensioen/overlijden: 4.890,00
+• Premievrijstelling: 126,86
+Totaal: 5.758,10
+Verwachte reserves op 31.01.2055 (67 jaar): 215.607,14 959.662,61 1.345.344,86
+conversiecoëfficiënt op basis van: eindleeftijd van 65 jaar
+Detail reserves op 10.09.2024
+Verworven reserves winstdeling inbegrepen op 10.09.2024
+Overeenkomst Bron Beleggingsvorm EUR
+310-1 Premie Fonds A 26.634,80(1)
+Fonds B 27.971,16(2)
+Subtotaal: 54.605,96
+310-2 Premie Fonds A 17.597,04(3)
+Subtotaal: 17.597,04
+Totaal: 72.203,00
+"""
+
+
+def test_nn_certificate():
+    from centen import pension
+    f = pension.parse_statement_text(NN_CERT)
+    assert f["reserve"]["amount"] == 72203.0 and f["reserve"]["date"] == "2024-09-10"
+    assert f["expected"]["amount"] == 959662.61
+    assert f["premium"]["amount"] == 4890.0
+    assert f["age"] == 67
