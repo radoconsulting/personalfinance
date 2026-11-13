@@ -51,7 +51,36 @@ nav.tabs button { background: none; border: 0; font: inherit; color: var(--text-
   border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 nav.tabs button[aria-selected="true"] { color: var(--text-1); border-bottom-color: var(--text-1); font-weight: 600; }
 nav.tabs button:hover { color: var(--text-1); }
-nav.tabs .tabsep { flex: 0 0 1px; align-self: center; height: 18px; background: var(--grid); margin: 0 6px; }
+nav.tabs .dot { margin-right: 7px; vertical-align: 1px; }
+nav.tabs .short { display: none; }
+/* r24: a second row with the tabs of the open pillar */
+.subtabs { display: flex; gap: 6px; margin: 0 0 12px; overflow-x: auto; scrollbar-width: none; }
+.subtabs::-webkit-scrollbar { display: none; }
+.subtabs button { border: 1px solid var(--ring); background: var(--card); border-radius: 99px; padding: 5px 13px; font: inherit;
+  font-size: 13px; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+.subtabs button[aria-selected="true"] { background: var(--text-1); border-color: var(--text-1); color: var(--page); font-weight: 600; }
+.subtabs button:not([aria-selected="true"]):hover { background: var(--wash); }
+.band { display: flex; align-items: baseline; gap: 6px 14px; flex-wrap: wrap; padding: 12px 16px; border-radius: 12px; margin-bottom: 14px;
+  background: color-mix(in srgb, var(--pc) 8%, var(--card)); border: 1px solid var(--ring); border-left: 4px solid var(--pc); }
+.band .bn { font-weight: 600; font-size: 14px; }
+.band .bv { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.band .bs { color: var(--text-2); font-size: 12.5px; }
+.total-hero .val { font-size: 52px; line-height: 1.05; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.total-hero .top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.total-hero .chg { display: flex; gap: 18px; flex-wrap: wrap; font-size: 13px; color: var(--text-2); }
+.total-hero .chg b { display: block; font-size: 17px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.total-hero .segbar { height: 34px; margin-top: 16px; } .total-hero .segbar > div { height: 34px; font-size: 13px; }
+.pillar { border-top: 4px solid var(--pc); display: flex; flex-direction: column; gap: 10px; }
+.pillar .ph { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pillar .pn { font-weight: 600; font-size: 14.5px; }
+.pillar .ps { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pillar .pv { font-size: 30px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.pillar .pd { color: var(--text-2); font-size: 12.5px; margin-top: -6px; }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: 5px 12px; font-size: 13px; border-top: 1px solid var(--grid); padding-top: 10px; }
+.kv > span { color: var(--text-2); } .kv > b { font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kv > .h { grid-column: 1 / -1; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; margin-top: 4px; }
+.pillar .go { margin-top: auto; align-self: flex-start; }
+.spark { height: 46px; }
 .filters { display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; flex-wrap: wrap; min-height: 34px; }
 .filters .lbl { color: var(--muted); font-size: 12.5px; }
 .seg { display: inline-flex; background: var(--card); border: 1px solid var(--ring); border-radius: 9px; padding: 2px; }
@@ -159,6 +188,8 @@ details.explain > div { margin-top: 6px; }
   .card { overflow-x: auto; } table.t { font-size: 12.5px; } table.t td, table.t th { padding: 6px 5px; }
   nav.tabs { position: sticky; top: 0; z-index: 5; background: var(--page); margin: 12px -10px 8px; padding: 0 10px; }
   nav.tabs button { padding: 10px 10px; }
+  nav.tabs .long { display: none; } nav.tabs .short { display: inline; }
+  .total-hero .val { font-size: 38px; } .pillar .pv { font-size: 25px; }
   .bars { grid-template-columns: minmax(80px, 34%) 1fr auto; }
   .alert { grid-template-columns: 22px 1fr; } .alert .am { grid-column: 2; text-align: left; }
   .flow { grid-template-columns: 1fr 18px 1fr; } .flow .what, .flow .amt { grid-column: span 3; text-align: left; }
@@ -189,7 +220,8 @@ tr.off td { color: var(--muted); }
     </div>
     <button class="iconbtn" id="theme" type="button" aria-label="Wissel licht/donker thema">◐<span class="lbl-long"> Thema</span></button>
   </header>
-  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <nav class="tabs" role="tablist" id="tabs" aria-label="Onderdelen"></nav>
+  <nav class="subtabs" role="tablist" id="subtabs" aria-label="Tabbladen" hidden></nav>
   <div class="filters" id="filters"></div>
   <main id="view"></main>
 </div>
@@ -464,20 +496,33 @@ function labelOn(rgb) {
 }
 
 // ---------- state ----------
-// Grouped: overview | money in and out | what you own | the future | the rest. "|" draws a divider.
-const TABS = [["total", "Totaal"], "|", ["personal", "Privé"], ["business", "BV"], ["fixed", "Vaste kosten"], "|",
-  ["invest", "Beleggingen"], ["possessions", "Bezittingen"], ["pension", "Pensioen"], "|", ["forecast", "Prognose"], ["planner", "Planner"], "|",
-  ["tax", "Fiscaal"], ["accounts", "Rekeningen"]];
+// r24: three pillars under one overview. Each tab belongs to one section; the top bar picks the section, the second
+// row the tab within it. Tab ids are unchanged, so old links (#invest, #pension…) still open the right page.
+const SECTIONS = [
+  {id: "overview", name: "Overzicht", tabs: [["total", "Overzicht"]]},
+  {id: "daily", name: "Dagelijkse boekhouding", short: "Dagelijks", pillar: "daily", color: "var(--s1)",
+    tabs: [["personal", "Privé"], ["business", "BV"], ["fixed", "Vaste kosten"], ["forecast", "Prognose"]]},
+  {id: "wealth", name: "Beleggingen en vermogen", short: "Vermogen", pillar: "wealth", color: "var(--s2)",
+    tabs: [["invest", "Beleggingen"], ["possessions", "Woning en bezittingen"]]},
+  {id: "pension", name: "Pensioen", short: "Pensioen", pillar: "pension", color: "var(--s3)",
+    tabs: [["pension", "Pensioen"], ["planner", "Planner"]]},
+  {id: "admin", name: "Fiscaal en rekeningen", short: "Beheer", tabs: [["tax", "Fiscaal"], ["accounts", "Rekeningen"]]},
+];
+const HAS_BV = D.accounts.some(a => a.scope === "business");
+if (!HAS_BV) SECTIONS[1].tabs = SECTIONS[1].tabs.filter(t => t[0] !== "business");
+const TABS = SECTIONS.flatMap(s => s.tabs);
+const sectionOf = id => SECTIONS.find(s => s.tabs.some(t => t[0] === id)) || SECTIONS[0];
 const TAB_ALIAS = {household: "personal"};
 const PERIOD_TABS = new Set(["total", "personal", "business", "household"]);
-const state = {tab: location.hash.slice(1) || "total", period: D.meta.default_period, fp: "personal", plan: {}};
+const state = {tab: location.hash.slice(1) || "total", period: D.meta.default_period, fp: "personal", plan: {}, last: {}, hist: "pillars"};
 state.tab = TAB_ALIAS[state.tab] || state.tab;
 if (!TABS.some(t => t[0] === state.tab)) state.tab = "total";
+function goTab(id) { state.tab = id; state.last[sectionOf(id).id] = id; render(); rememberTab(id); scrollTo(0, 0); }
+function goSection(sid) { const s = SECTIONS.find(x => x.id === sid); goTab(state.last[sid] || s.tabs[0][0]); }
 const P = () => D.periods[state.period];
 const BROKERS = D.investments.by_destination.filter(d => Math.abs(d.net_deposited) >= 1).map(d => nlName(d.destination));
 const brokerList = (n = 3) => BROKERS.length ? BROKERS.slice(0, n).join(", ") + (BROKERS.length > n ? ", …" : "") : "geen gevonden";
 const NOT_ADDED = (D.investments.not_added || []).filter(u => Math.abs(u.net_deposited) >= 1).map(u => nlName(u.destination));
-const HAS_BV = D.accounts.some(a => a.scope === "business");
 function periodMonths(key) {
   const p = D.periods[key];
   return [p.period.from.slice(0, 7), p.period.to.slice(0, 7)];
@@ -505,15 +550,20 @@ function rememberTab(id) {
   try { history.replaceState(null, "", "#" + id); } catch (e) { /* preview frame: tab still switches */ }
 }
 function renderTabs() {
-  const nav = document.getElementById("tabs"); nav.textContent = "";
-  for (const t of TABS) {
-    if (t === "|") { nav.append(el("span", {class: "tabsep", "aria-hidden": "true"})); continue; }
-    const [id, name] = t;
-    nav.append(el("button", {role: "tab", type: "button", "aria-selected": String(id === state.tab),
-    onclick: () => { state.tab = id; render(); rememberTab(id); }}, name));
+  const nav = document.getElementById("tabs"), sub = document.getElementById("subtabs");
+  nav.textContent = ""; sub.textContent = "";
+  const cur = sectionOf(state.tab);
+  for (const s of SECTIONS) {
+    nav.append(el("button", {role: "tab", type: "button", "aria-selected": String(s === cur), onclick: () => goSection(s.id)},
+      s.color ? el("i", {class: "dot", style: `background:${s.color}`, "aria-hidden": "true"}) : null,
+      el("span", {class: "long"}, s.name), el("span", {class: "short"}, s.short || s.name)));
   }
-  const act = nav.querySelector('[aria-selected="true"]');  // on a phone the bar scrolls: keep the open tab in view
-  if (act && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, act.offsetLeft - nav.clientWidth / 2 + act.offsetWidth / 2);
+  sub.hidden = cur.tabs.length < 2;
+  for (const [id, name] of cur.tabs) sub.append(el("button", {role: "tab", type: "button", "aria-selected": String(id === state.tab), onclick: () => goTab(id)}, name));
+  for (const bar of [nav, sub]) {  // on a phone the bars scroll: keep the open one in view
+    const act = bar.querySelector('[aria-selected="true"]');
+    if (act && bar.scrollWidth > bar.clientWidth) bar.scrollLeft = Math.max(0, act.offsetLeft - bar.clientWidth / 2 + act.offsetWidth / 2);
+  }
 }
 function renderFilters() {
   const f = document.getElementById("filters"); f.textContent = "";
@@ -596,18 +646,6 @@ function netWorthSub() {
   if (!T.loans_outstanding) txt += " Openstaande leningen niet ingegeven.";
   return txt;
 }
-function compositionParts() {
-  const NW = D.net_worth || {}, cash = D.periods[D.meta.default_period].cash, T = D.investments.totals;
-  const pens = (T.by_type || {}).pension || 0, invNoPension = investTotal() - pens;
-  const owned = (NW.property || 0) + (NW.possessions || 0) - Math.abs(NW.loans || 0);
-  return [
-    {label: "Liquide privé", value: cash.personal || 0, color: "var(--s1)"},
-    {label: "Liquide BV", value: cash.business || 0, color: "var(--s6)", dark: true},
-    {label: "Beleggingen", value: invNoPension, color: "var(--s2)"},
-    {label: "Pensioen", value: pens, color: "var(--s3)", dark: true},
-    {label: "Woning en bezittingen (netto)", value: owned, color: "var(--s4)", dark: true},
-  ].filter(x => x.value > 0.5);
-}
 // A block that is open on a wide screen and folded on a phone; the reader's choice is remembered per block.
 function foldable(id, summary, body) {
   let open = matchMedia("(min-width: 601px)").matches;
@@ -617,99 +655,164 @@ function foldable(id, summary, body) {
   return d;
 }
 function investTotal() { const T = D.investments.totals; return (T.investments_value || 0) + (T.not_added_net_deposited || 0); }
-function viewTotal(v) {
-  const p = P(), latest = D.periods[D.meta.default_period];
-  const cash = latest.cash, T = D.investments.totals, L = D.investments.loans;
-  const S = X("scopes"), SP = S && S.personal, SB = S && S.business;
-  const valued = D.investments.accounts.filter(a => a.value != null && a.type !== "property").length;
-  const investSub = () => { const PT = (D.investments.portfolio || {}).totals || {}; return (PT.day_change != null ? `vandaag ${eurS(PT.day_change)} · live ${PT.prices_as_of.slice(11, 16)} · ` : "") + (valued ? `${valued} rekening${valued > 1 ? "en" : ""} met waarde` + (NOT_ADDED.length ? ` + inleg ${NOT_ADDED.slice(0, 3).join(", ")}` : "")
-      : `netto inleg · ${brokerList()}`); };
-  const loanTile = () => L.length ? tile("Leningen", eur(SP ? SP.loans : T.loans_outstanding), "nog te betalen" + (D.loans.length ? ` · ${eur(D.loans.reduce((a, l) => a + l.monthly, 0))} / maand` : ""))
-      : tile("Lening", D.loans.length ? eur(D.loans.reduce((a, l) => a + l.monthly, 0)) + " / maand" : "—", D.loans.map(l => nlName(l.lender)).join(", ") || "geen gevonden");
-  const possTile = () => { const PO = D.possessions; return PO && !PO.error && PO.items.length
-      ? tile("Woning en bezittingen", eur(PO.total), PO.home.value ? `woning ${eur(PO.home.value)} · andere ${eur(PO.without_home)}` : Object.entries(PO.by_kind).map(([k, x]) => `${k.toLowerCase()} ${eur(x)}`).join(" · "))
-      : tile("Bezittingen", "—", "woning, wagen, horloge…: voeg ze toe in de bijwerk-app", "placeholder"); };
-  if (!SP) {  // without the split (an error): the combined view as before
-    v.append(el("h2", {class: "sec"}, "Stand vandaag"));
-    v.append(el("div", {class: "grid g4"},
-      el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Vermogen"), el("div", {class: "val"}, eur(D.net_worth.total)),
-        el("div", {class: "sub"}, netWorthSub())),
-      tile("Liquide privé", eur(cash.personal), cashSub("personal")),
-      tile("Liquide BV", eur(cash.business), cashSub("business"))));
-    v.append(el("div", {class: "grid g4", style: "margin-top:14px"}, tile("Beleggingen", eur(investTotal()), investSub()),
-      gainTile(T),
-      loanTile(), possTile()));
-  } else {
-    // --- privé: van jou ---
-    v.append(el("h2", {class: "sec"}, "Privé ", el("span", {class: "chip scope pv"}, "van jou")));
-    v.append(el("div", {class: "grid g4"},
-      el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Vrij beschikbaar"), el("div", {class: "val"}, eur(SP.available_now)),
-        el("div", {class: "sub"}, `liquide ${eur(SP.cash)} + beleggingen ${eur(SP.investments)} · wat je kan uitgeven of verkopen zonder de BV`)),
-      tile("Privévermogen", eur(SP.net_worth), `vrij ${eur(SP.available_now)} · pensioen ${eur(SP.locked)} · woning en bezittingen netto ${eur(SP.owned)}`),
-      tile("Liquide privé", eur(SP.cash), cashSub("personal"))));
-    // the four parts of the private net worth: open on a wide screen, folded on a phone (r22)
-    v.append(foldable("privé-delen", `Beleggingen ${eur(SP.investments)} · pensioen ${eur(SP.pension)} · woning en leningen`,
-      el("div", {class: "grid g4"},
-        tile("Beleggingen privé", eur(SP.investments), investSub()),
-        tile("Pensioen", eur(SP.pension), SP.pension ? "vast tot je pensioendatum · ook als de BV de premie betaalt" : "geen pensioencontract ingegeven", SP.pension ? "" : "placeholder"),
-        possTile(), loanTile())));
-    const pc = [
-      {label: "Liquide", value: SP.cash, color: "var(--s1)"}, {label: "Beleggingen", value: SP.investments, color: "var(--s2)"},
-      {label: "Pensioen (vast)", value: SP.pension, color: "var(--s3)", dark: true},
-      {label: "Woning en bezittingen (netto)", value: SP.owned, color: "var(--s4)", dark: true}].filter(x => x.value > 0.5);
-    if (pc.length > 1) {
-      const cc = card("Waar zit je privévermogen", `${eur(SP.net_worth)} · leningen afgetrokken van je woning en bezittingen`, {table: () => table([
-        {label: "Deel", get: r => r.label}, {label: "Bedrag", num: true, get: r => eur(r.value)}, {label: "Aandeel", num: true, get: r => pct(r.value / SP.net_worth)}], pc)});
-      cc.root.style.marginTop = "14px";
-      v.append(cc.root);
-      requestAnimationFrame(() => segmented(cc.body, pc));
-    }
-    // --- BV: van de vennootschap ---
-    if (SB) {
-      const vat = SB.vat_due || {}, cit = SB.corporate_tax_due || {};
-      v.append(el("h2", {class: "sec", style: "margin-top:22px"}, "BV ", el("span", {class: "chip scope bv"}, "van de vennootschap, niet vrij te besteden")));
-      v.append(el("div", {class: "grid g4"},
-        tile("Liquide BV", eur(SB.cash), cashSub("business")),
-        tile("Nog te betalen (schatting)", eur(SB.owed_estimate), `btw ${eur(vat.amount)} sinds ${dLabel(vat.since)} · VenB ${cit.year} ${eur(cit.amount)} na ${eur(cit.prepaid)} voorafbetaald`),
-        tile("Vrij in de BV", eur(SB.net_worth), (SB.investments ? `liquide na btw en VenB + beleggingen ${eur(SB.investments)}` : "liquide na btw en VenB") + " · blijft van de vennootschap"),
-        tile("Netto voor jou bij uitkering", eur(SB.net_to_you), `als ${SB.payout_route === "VVPRbis" ? "VVPRbis-dividend" : "gewoon dividend"} na ${pct(SB.payout_rate)} roerende voorheffing · pas beschikbaar na een uitkering`)));
-      const bc = [
-        {label: "Btw en VenB nog te betalen", value: SB.owed_estimate, color: "var(--s5)", dark: true},
-        {label: "Roerende voorheffing bij uitkering", value: Math.max(0, SB.net_worth) - SB.net_to_you, color: "var(--s3)", dark: true},
-        {label: "Netto voor jou", value: SB.net_to_you, color: "var(--s6)", dark: true}].filter(x => x.value > 0.5);
-      const bcc = card("Wat er van het geld in de BV bij jou kan komen", `Van ${eur(SB.cash + SB.investments)} in de BV`, {table: () => table([
-        {label: "Deel", get: r => r.label}, {label: "Bedrag", num: true, get: r => eur(r.value)}], bc)});
-      bcc.root.style.marginTop = "14px";
-      v.append(bcc.root);
-      requestAnimationFrame(() => segmented(bcc.body, bc));
-    }
-    v.append(el("details", {class: "note explain"},
-      el("summary", {}, el("b", {}, `Samen ${eur(S.total)}`), `: privé ${eur(SP.net_worth)}` + (SB ? ` + BV ${eur(SB.net_worth)}` : "") + " · hoe is dit berekend?"),
-      el("div", {}, (SB ? "BV na geschatte btw en VenB, vóór roerende voorheffing. " : "") + S.notes)));
+// ---------- r24: the overview — the total and its three pillars ----------
+const PILLARS = [
+  {key: "daily", name: "Dagelijkse boekhouding", color: "var(--s1)", section: "daily"},
+  {key: "wealth", name: "Beleggingen en vermogen", color: "var(--s2)", section: "wealth"},
+  {key: "pension", name: "Pensioen", color: "var(--s3)", section: "pension", dark: true},
+];
+// The total cut into the three pillars; they add up to the total (centen/scopes.py: pillars).
+function pillarValues() {
+  const S = X("scopes");
+  if (S && S.pillars) return {total: S.total, daily: S.pillars.daily.value, wealth: S.pillars.wealth.value, pension: S.pillars.pension.value, P: S.pillars, S};
+  const cash = D.periods[D.meta.default_period].cash, NW = D.net_worth || {};
+  const daily = (cash.personal || 0) + (cash.business || 0), pension = ((D.investments.totals.by_type || {}).pension) || 0;
+  return {total: NW.total, daily, pension, wealth: (NW.total || 0) - daily - pension, P: null, S: null};
+}
+// History per pillar: liquid = the bank accounts, pension = the pension contracts, the rest is investments and wealth.
+function pillarHistory(p) {
+  const cash = p.cash_personal == null && p.cash_business == null ? null : (p.cash_personal || 0) + (p.cash_business || 0);
+  const pension = p.pension == null ? null : p.pension;
+  if (pension == null && pensionValue()) return {daily: cash, wealth: null, pension: null};  // a snapshot from before r24
+  const wealth = p.total != null && cash != null ? p.total - cash - (pension || 0)
+    : (p.investments || 0) - (pension || 0) + (p.property || 0) - (p.loans || 0);
+  return {daily: cash, wealth, pension};
+}
+const shareOf = (x, t) => t > 0 && x != null ? pct(Math.max(0, x) / t) : "—";
+function pillarSub(key) {
+  const PV = pillarValues(), Q = PV.P, O = X("pension");
+  if (key === "daily") return Q ? `liquide privé ${eur(Q.daily.cash_personal)}` + (Q.daily.cash_business != null ? ` · BV ${eur(Q.daily.cash_business + Q.daily.owed_business)} na btw en VenB` : "") : "zicht- en spaarrekeningen";
+  if (key === "wealth") return Q ? `beleggingen ${eur((Q.wealth.investments_personal || 0) + (Q.wealth.investments_business || 0))} · woning en bezittingen netto ${eur(Q.wealth.owned_net)}` : "beleggingen, woning en bezittingen min leningen";
+  return (O && O.years_to_retirement != null ? `${eur(O.monthly_income_today_eur)} per maand vanaf ${dLabel(O.retirement_date)} · ` : "") + "vast tot je pensioendatum";
+}
+function pillarBand(sec) {
+  if (!sec.pillar) return null;
+  const PV = pillarValues(), val = PV[sec.pillar];
+  return el("div", {class: "band", style: `--pc:${sec.color}`}, el("span", {class: "bn"}, sec.name), el("span", {class: "bv"}, eur(val)),
+    el("span", {class: "bs"}, `${shareOf(val, PV.total)} van je vermogen · ${pillarSub(sec.pillar)}`),
+    el("button", {class: "toggle", type: "button", style: "margin-left:auto", onclick: () => goTab("total")}, "← Overzicht"));
+}
+function spark(host, values, color) {
+  host.textContent = "";
+  const pts = values.map((v, i) => [i, v]).filter(x => x[1] != null);
+  if (pts.length < 2) return;
+  const W = Math.max(120, host.clientWidth || 240), H = 46, pad = 4;
+  const lo = Math.min(...pts.map(x => x[1])), hi = Math.max(...pts.map(x => x[1])), span = hi - lo || 1;
+  const x = i => pad + i / (values.length - 1) * (W - 2 * pad), y = v => pad + (hi - v) / span * (H - 2 * pad);
+  const d = pts.map((q, k) => (k ? "L" : "M") + x(q[0]).toFixed(1) + " " + y(q[1]).toFixed(1)).join("");
+  const svg = sv("svg", {width: W, height: H, viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true"});
+  svg.append(sv("path", {d: d + `L${x(pts[pts.length - 1][0])} ${H}L${x(pts[0][0])} ${H}Z`, fill: color, "fill-opacity": 0.1}));
+  svg.append(sv("path", {d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round"}));
+  const L = pts[pts.length - 1];
+  svg.append(sv("circle", {cx: x(L[0]), cy: y(L[1]), r: 3.5, fill: color, stroke: "var(--card)", "stroke-width": 2}));
+  host.append(svg);
+}
+function kv(rows) {
+  return el("div", {class: "kv"}, rows.filter(Boolean).flatMap(r => r.h ? [el("span", {class: "h"}, r.h)]
+    : [el("span", {}, r[0]), el("b", {style: r[2] ? `color:${r[2]}` : null}, r[1])]));
+}
+function pillarCard(P0, rows, histKey, foot) {
+  const PV = pillarValues(), val = PV[P0.key];
+  const c = el("section", {class: "card pillar", style: `--pc:${P0.color}`},
+    el("div", {class: "ph"}, el("span", {class: "pn"}, P0.name), el("span", {class: "ps"}, `${shareOf(val, PV.total)} van het totaal`)),
+    el("div", {class: "pv"}, eur(val)), el("div", {class: "pd"}, pillarSub(P0.key)));
+  const H = X("networth_history"), host = el("div", {class: "spark"});
+  if (H && H.points.length >= 3) {
+    const pts = H.points.slice(-24);
+    c.append(host);
+    requestAnimationFrame(() => spark(host, pts.map(p => pillarHistory(p)[histKey]), P0.color));
   }
-  if (D.networth_history) { const nw = networthCard(""); nw.root.style.marginTop = "14px"; v.append(nw.root); }
-  v.append(el("h2", {class: "sec"}, `In ${p.label.toLowerCase()}`));
+  c.append(kv(rows));
+  if (foot) c.append(el("div", {class: "note"}, foot));
+  c.append(el("button", {class: "toggle go", type: "button", onclick: () => goSection(P0.section)}, `Naar ${P0.name.toLowerCase()} →`));
+  return c;
+}
+function viewTotal(v) {
+  const p = P(), PV = pillarValues(), S = PV.S, SP = S && S.personal, SB = S && S.business, Q = PV.P;
+  const T = D.investments.totals, H = X("networth_history"), O = X("pension");
+  // --- the total ---
+  const hero = el("section", {class: "card total-hero"});
+  const chg = [];
+  if (H && H.change_last_month != null) chg.push(el("div", {}, "Vorige maand", el("b", {style: `color:${H.change_last_month < 0 ? "var(--neg)" : "inherit"}`}, eurS(H.change_last_month))));
+  if (H && H.change_12_months != null) chg.push(el("div", {}, "12 maanden", el("b", {style: `color:${H.change_12_months < 0 ? "var(--neg)" : "inherit"}`}, eurS(H.change_12_months))));
+  hero.append(el("div", {class: "top"},
+    el("div", {}, el("div", {class: "lbl sec-text"}, "Totaal vermogen"), el("div", {class: "val"}, eur(PV.total)),
+      el("div", {class: "sub note", style: "margin-top:4px"}, SP ? `van jou ${eur(SP.net_worth)}` + (SB ? ` · in de BV ${eur(SB.net_worth)} na geschatte btw en VenB` : "") : netWorthSub())),
+    chg.length ? el("div", {class: "chg"}, chg) : null));
+  const bar = el("div");
+  hero.append(bar);
+  v.append(hero);
+  const parts = PILLARS.map(x => ({label: x.name, value: PV[x.key], color: x.color, dark: x.dark}));
+  requestAnimationFrame(() => segmented(bar, parts));
+  const neg = PILLARS.filter(x => PV[x.key] < -0.5);
+  if (neg.length) hero.append(el("div", {class: "note"}, `${neg.map(x => x.name).join(", ")} negatief (${neg.map(x => eur(PV[x.key])).join(", ")}): niet in de balk, wel in het totaal.`));
+
+  // --- the three pillars ---
+  const rec = D.recurring.filter(r => r.scope === "personal" && r.direction === "out" && r.kind === "expense");
+  const up = D.upcoming.items.filter(i => i.scope === "personal" && i.amount < 0);
   const net = p.personal.income - p.personal.spending;
-  v.append(el("div", {class: "grid g4"},
-    tile("Privé: inkomen − uitgaven", eurS(net), `inkomen ${eur(p.personal.income)} · uitgaven ${eur(p.personal.spending)}`),
-    tile("Privé: netto naar beleggingen", eur(p.personal.net_put_into_investments), "in deze periode"),
-    HAS_BV ? tile("Van de BV naar jou", eur(p.company_to_you.total), `bezoldiging ${eur(p.company_to_you.net_salary)} · dividend ${eur(p.company_to_you.dividends_net)}` + (p.company_to_you.into_your_pension ? ` · pensioen ${eur(p.company_to_you.into_your_pension)}` : "") + " · telt in je privé-inkomen") : null,
-    HAS_BV ? tile("BV: resultaat vóór VenB", eur(p.business.result_before_corporate_tax), `omzet ${eur(p.business.revenue_incl_vat)} incl. btw · blijft in de BV`) : null,
-  ));
-  const ms = monthly("personal");
-  const c = card("Privé: inkomen en uitgaven per maand", "Wat binnenkomt op je privé- en gedeelde rekeningen (ook loon en dividend uit de BV) en wat je uitgeeft" + partialNote(ms), {
-    table: () => table([{label: "Maand", get: mRow}, {label: "Inkomen", num: true, get: r => eur(r.income)},
-      {label: "Uitgaven", num: true, get: r => eur(r.spending)}, {label: "Netto", num: true, get: r => eurS(r.income - r.spending)}], ms)});
-  const g = el("div", {class: "grid g3", style: "margin-top:14px;align-items:start"});
-  c.root.classList.add("span2");
-  g.append(c.root);
+  const daily = pillarCard(PILLARS[0], [
+    ["Liquide privé", eur(Q ? Q.daily.cash_personal : p.cash.personal)],
+    HAS_BV && Q && Q.daily.cash_business != null ? ["Liquide BV", eur(Q.daily.cash_business)] : null,
+    HAS_BV && Q && Q.daily.owed_business ? ["BV: nog te betalen btw en VenB", eur(Q.daily.owed_business)] : null,
+    {h: p.label},
+    ["Privé: inkomen", eur(p.personal.income)], ["Privé: uitgaven", eur(p.personal.spending)],
+    ["Over", eurS(net), net < 0 ? "var(--neg)" : null],
+    HAS_BV ? ["BV: resultaat vóór VenB", eur(p.business.result_before_corporate_tax)] : null,
+    {h: "Vast"},
+    ["Vaste kosten per maand", eur(rec.reduce((a, r) => a + r.monthly_equivalent, 0))],
+    ["Komende 45 dagen", `${up.length}× · ${eur(up.reduce((a, i) => a - i.amount, 0))}`],
+  ], "daily");
+  const PT = (D.investments.portfolio || {}).totals || {};
+  const invP = Q ? Q.wealth.investments_personal : null, invB = Q ? Q.wealth.investments_business : null;
+  const wealth = pillarCard(PILLARS[1], [
+    ["Beleggingen privé", eur(invP != null ? invP : investTotal() - ((T.by_type || {}).pension || 0))],
+    invB ? ["Beleggingen BV", eur(invB)] : null,
+    PT.day_change != null ? ["Vandaag (live koersen)", eurS(PT.day_change), PT.day_change < 0 ? "var(--neg)" : null] : null,
+    {h: "Woning en bezittingen"},
+    Q && Q.wealth.property ? ["Woning", eur(Q.wealth.property)] : null,
+    Q && Q.wealth.possessions ? ["Andere bezittingen", eur(Q.wealth.possessions)] : null,
+    Q && Q.wealth.loans ? ["Leningen", eur(Q.wealth.loans), "var(--neg)"] : null,
+    Q ? ["Netto", eur(Q.wealth.owned_net)] : ["Netto", eur((T.property || 0) + (T.possessions || 0) - (T.loans_outstanding || 0))],
+  ], "wealth");
+  const has = O && O.years_to_retirement != null;
+  const pension = pillarCard(PILLARS[2], [
+    ["Kapitaal 2e en 3e pijler nu", eur(PV.pension)],
+    has ? ["Pensioen vanaf", `${dLabel(O.retirement_date)} · over ${num1.format(O.years_to_retirement)} jaar`] : null,
+    {h: "Per maand, euro van vandaag"},
+    has ? ["Inkomen bij pensioen", eur(O.monthly_income_today_eur)] : ["Inkomen bij pensioen", "geboortedatum en mypension.be nodig"],
+    O ? ["Je uitgaven nu", eur(O.spending_monthly_now)] : null,
+    has && O.gap_monthly_today_eur != null ? [O.gap_monthly_today_eur > 0 ? "Tekort" : "Overschot", eur(Math.abs(O.gap_monthly_today_eur)), O.gap_monthly_today_eur > 0 ? "var(--neg)" : "var(--good-text)"] : null,
+  ], "pension", O && O.replacement_ratio != null ? `Je pensioen dekt ${pct(O.replacement_ratio)} van je uitgaven nu.` : null);
+  v.append(el("div", {class: "grid g3", style: "margin-top:14px;align-items:stretch"}, daily, wealth, pension));
+
+  // --- over time ---
+  if (D.networth_history) { const nw = networthCard("", true); nw.root.style.marginTop = "14px"; v.append(nw.root); }
+
+  // --- yours and the company's, and what needs attention ---
+  const g = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
+  if (SP) {
+    const c = card("Van jou en van de BV", "Dezelfde som, anders verdeeld: wat is vrij, wat zit vast, wat is van de vennootschap");
+    c.body.append(kv([
+      {h: "Privé · van jou"},
+      ["Vrij beschikbaar (liquide en beleggingen)", eur(SP.available_now)],
+      ["Vast tot je pensioen", eur(SP.locked)],
+      ["Woning en bezittingen min leningen", eur(SP.owned)],
+      ["Privévermogen", eur(SP.net_worth)],
+      SB ? {h: "BV · van de vennootschap"} : null,
+      SB ? ["Vrij in de BV", eur(SB.net_worth)] : null,
+      SB ? [`Netto voor jou bij uitkering (${SB.payout_route === "VVPRbis" ? "VVPRbis" : "dividend"})`, eur(SB.net_to_you)] : null,
+    ]));
+    c.body.append(el("details", {class: "note explain"}, el("summary", {}, "Hoe is dit berekend?"), el("div", {}, (SB ? "BV na geschatte btw en VenB, vóór roerende voorheffing. " : "") + S.notes)));
+    if (HAS_BV) c.body.append(el("button", {class: "toggle", type: "button", style: "margin-top:10px", onclick: () => goTab("business")}, "BV in detail →"));
+    g.append(c.root);
+  }
   const a = card("Aandachtspunten", "Laatste 60 dagen en fiscale signalen");
   const items = taxCheck().concat(alertItems(null)).slice(0, 7);
   a.body.append(items.length ? el("div", {class: "alerts"}, items) : el("div", {class: "empty"}, "Niets opvallends."));
+  if (!SP) a.root.classList.add("span4");
   g.append(a.root);
   v.append(g);
-  requestAnimationFrame(() => lineChart(c.body, {labels: full(ms).map(m => m.month), series: [
-    {name: "Inkomen", values: full(ms).map(m => m.income), color: SERIES[0]}, {name: "Uitgaven", values: full(ms).map(m => m.spending), color: SERIES[1]}]}));
 }
 
 function viewPersonal(v) {
@@ -739,7 +842,7 @@ function viewPersonal(v) {
     {label: "Bedrag", num: true, get: r => eur(r.typical_amount)}, {label: "Per maand", num: true, get: r => eur(r.monthly_equivalent)},
     {label: "Volgende", num: true, get: r => dLabel(r.next_expected)}], rec.slice().sort((x, y) => y.monthly_equivalent - x.monthly_equivalent).slice(0, 8)) : el("div", {class: "empty"}, "Geen vaste kosten herkend."));
   if (rec.length) fixed.body.append(el("button", {class: "toggle", type: "button", style: "margin-top:8px",
-    onclick: () => { state.tab = "fixed"; render(); rememberTab("fixed"); scrollTo(0, 0); }}, rec.length > 8 ? `Alle ${rec.length} vaste kosten, prijsstijgingen en overlap →` : "Details, prijsstijgingen en overlap →"));
+    onclick: () => goTab("fixed")}, rec.length > 8 ? `Alle ${rec.length} vaste kosten, prijsstijgingen en overlap →` : "Details, prijsstijgingen en overlap →"));
   const up = D.upcoming.items.filter(i => i.scope === "personal" && i.amount < 0);
   const bills = card("Komende 45 dagen", `${up.length} verwachte betalingen · ${eur(up.reduce((a, i) => a - i.amount, 0))}`);
   bills.body.append(up.length ? table([{label: "Datum", get: r => dLabel(r.date)}, {label: "Wat", get: r => nlName(r.merchant)},
@@ -766,6 +869,26 @@ function viewPersonal(v) {
 
 function viewBusiness(v) {
   const b = P().business;
+  const S = X("scopes"), SB = S && S.business;
+  if (SB) {  // r24: the company's position today (was on the Totaal tab)
+    const vat = SB.vat_due || {}, cit = SB.corporate_tax_due || {};
+    v.append(el("h2", {class: "sec", style: "margin-top:0"}, "Stand vandaag ", el("span", {class: "chip scope bv"}, "van de vennootschap, niet vrij te besteden")));
+    v.append(el("div", {class: "grid g4"},
+      tile("Liquide BV", eur(SB.cash), cashSub("business")),
+      tile("Nog te betalen (schatting)", eur(SB.owed_estimate), `btw ${eur(vat.amount)} sinds ${dLabel(vat.since)} · VenB ${cit.year} ${eur(cit.amount)} na ${eur(cit.prepaid)} voorafbetaald`),
+      tile("Vrij in de BV", eur(SB.net_worth), (SB.investments ? `liquide na btw en VenB + beleggingen ${eur(SB.investments)}` : "liquide na btw en VenB") + " · blijft van de vennootschap"),
+      tile("Netto voor jou bij uitkering", eur(SB.net_to_you), `als ${SB.payout_route === "VVPRbis" ? "VVPRbis-dividend" : "gewoon dividend"} na ${pct(SB.payout_rate)} roerende voorheffing · pas beschikbaar na een uitkering`)));
+    const bc = [
+      {label: "Btw en VenB nog te betalen", value: SB.owed_estimate, color: "var(--s5)", dark: true},
+      {label: "Roerende voorheffing bij uitkering", value: Math.max(0, SB.net_worth) - SB.net_to_you, color: "var(--s3)", dark: true},
+      {label: "Netto voor jou", value: SB.net_to_you, color: "var(--s6)", dark: true}].filter(x => x.value > 0.5);
+    const bcc = card("Wat er van het geld in de BV bij jou kan komen", `Van ${eur(SB.cash + SB.investments)} in de BV`, {table: () => table([
+      {label: "Deel", get: r => r.label}, {label: "Bedrag", num: true, get: r => eur(r.value)}], bc)});
+    bcc.root.style.marginTop = "14px";
+    v.append(bcc.root);
+    requestAnimationFrame(() => segmented(bcc.body, bc));
+    v.append(el("h2", {class: "sec"}, `In ${P().label.toLowerCase()}`));
+  }
   v.append(el("div", {class: "grid g4"},
     tile("Omzet (incl. btw)", eur(b.revenue_incl_vat), `btw afgedragen ${eur(b.vat_paid)}`),
     tile("Resultaat vóór VenB", eur(b.result_before_corporate_tax), "kasbasis, geen boekhoudkundig resultaat"),
@@ -873,13 +996,24 @@ function gainCell(a) {
   return el("span", {style: `color:${a.gain < 0 ? "var(--neg)" : "inherit"}`}, eurS(a.gain), a.gain_pct != null ? el("span", {class: "muted"}, ` ${pctS(a.gain_pct)}`) : null,
     a.contributions_uncertain ? el("span", {class: "chip", style: "color:var(--warning)", title: `Stortingen vóór ${dLabel(a.contributions_since)} ontbreken mogelijk in de inleg: geef je totale inleg in onder Bijwerken.`}, "inleg?") : null);
 }
-// The Totaal tab shows investments and pension apart; here they're together, so say so and show the split (r22).
-const PENSIONISH = ["pension", "insurance"];
-function investLabel(accs) { return accs.some(a => PENSIONISH.includes(a.type)) ? "Beleggingen en pensioen" : "Beleggingen"; }
+// r24: pension contracts live under Pensioen; tak 21/23 stays with the investments (as in centen/scopes.py).
 function investSplit(accs) {
-  if (!accs.some(a => PENSIONISH.includes(a.type))) return null;
-  const sum = f => accs.filter(f).reduce((t, a) => t + (a.value != null ? a.value : (a.contributions || 0)), 0);
-  return el("div", {class: "sub"}, `beleggingen ${eur(sum(a => !PENSIONISH.includes(a.type)) + (D.investments.totals.not_added_net_deposited || 0))} · pensioen en tak 21/23 ${eur(sum(a => PENSIONISH.includes(a.type)))}`);
+  const ins = accs.filter(a => a.type === "insurance");
+  const pens = D.investments.accounts.filter(a => a.type === "pension");
+  const txt = [];
+  if (ins.length) txt.push(`waarvan tak 21/23 ${eur(ins.reduce((t, a) => t + (a.value != null ? a.value : (a.contributions || 0)), 0))}`);
+  if (pens.length) txt.push(`pensioencontracten (${eur(pensionValue())}) staan onder Pensioen`);
+  return txt.length ? el("div", {class: "sub"}, txt.join(" · ")) : null;
+}
+function pensionValue() { return ((D.investments.totals.by_type || {}).pension) || 0; }
+// The return over the investment accounts only (the totals from the server include the pension contracts).
+function investGainTotals(T) {
+  const pens = new Set(D.investments.accounts.filter(a => a.type === "pension").map(a => a.name));
+  const valued = D.investments.accounts.filter(a => !pens.has(a.name) && !["property", "asset", "loan"].includes(a.type) &&
+    a.value != null && a.contributions != null && a.gain != null && a.contributions_complete !== false);
+  const gain = valued.reduce((t, a) => t + a.gain, 0), contrib = valued.reduce((t, a) => t + a.contributions, 0);
+  return {...T, gain_on_valued_accounts: valued.length ? gain : null, gain_pct: valued.length && contrib > 0 ? gain / contrib : null,
+    gain_excluded: (T.gain_excluded || []).filter(n => !pens.has(n)), gain_uncertain: (T.gain_uncertain || []).filter(n => !pens.has(n))};
 }
 function gainTile(T) {
   const ex = T.gain_excluded || [];
@@ -900,19 +1034,19 @@ function liveLine() {
 }
 function viewInvest(v) {
   const I = D.investments, T = I.totals;
-  const accs = I.accounts.filter(a => !["property", "asset"].includes(a.type));
+  const accs = I.accounts.filter(a => !["property", "asset", "pension"].includes(a.type));
   const notAdded = I.not_added.filter(u => Math.abs(u.net_deposited) >= 1);
   const valued = accs.filter(a => a.value != null);
-  const contribAll = (T.investments_contributions || 0) + notAdded.reduce((a, u) => a + u.net_deposited, 0);
+  const contribAll = accs.reduce((t, a) => t + (a.contributions || 0), 0) + notAdded.reduce((a, u) => a + u.net_deposited, 0);
   v.append(el("div", {class: "grid g4"},
-    el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, investLabel(accs)), el("div", {class: "val"}, eur(investTotal())),
+    el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Beleggingen"), el("div", {class: "val"}, eur(investTotal() - pensionValue())),
       investSplit(accs),
       el("div", {class: "sub"}, liveLine(), accs.length
         ? `${valued.length} van ${accs.length} rekening${accs.length > 1 ? "en" : ""} met waarde` + (T.oldest_value ? ` · oudste waarde ${dLabel(T.oldest_value)}` : "") +
           (notAdded.length ? ` · ${notAdded.map(u => nlName(u.destination)).join(", ")} nog niet toegevoegd: aan netto inleg (min. 0)` : "")
         : "Nog geen beleggingsrekeningen toegevoegd: dit is je netto inleg (stortingen min opnames), niet de waarde.")),
-    tile("Inleg", eur(contribAll), "netto gestort, alle rekeningen"),
-    gainTile(T),
+    tile("Inleg", eur(contribAll), "netto gestort, alle beleggingsrekeningen"),
+    gainTile(investGainTotals(T)),
   ));
   const rows = accs.map(a => ({...a, _added: true})).concat(notAdded.map(u => ({name: u.destination, provider: null, type: u.type_guess,
     scope: u.scope, contributions: u.net_deposited, value: null, _added: false})));
@@ -930,12 +1064,12 @@ function viewInvest(v) {
     {label: "XIRR", num: true, get: r => PFA[r.name] && PFA[r.name].totals.xirr != null ? el("span", {title: "Geldgewogen rendement per jaar, uit de stortingen in de brokerexport en de huidige waarde"}, pctS(PFA[r.name].totals.xirr)) : "—"},
     {label: "Posities", num: true, get: r => r.positions ? `${r.positions.count} · ${dLabel(r.positions.as_of)}` : "—"}], rows)
     : el("div", {class: "empty"}, "Nog niets: vraag Claude om je beleggingsrekeningen toe te voegen."));
-  const parts = Object.entries(T.by_type).filter(([k, x]) => x > 0 && !["property", "asset"].includes(k)).map(([k, x]) => ({label: TYPE_GROUP_NL[k] || k, value: x, color: TYPE_COLOR[k] || "var(--s8)", dark: ["investment", "pension", "insurance"].includes(k) ? false : true}));
+  const parts = Object.entries(T.by_type).filter(([k, x]) => x > 0 && !["property", "asset", "pension"].includes(k)).map(([k, x]) => ({label: TYPE_GROUP_NL[k] || k, value: x, color: TYPE_COLOR[k] || "var(--s8)", dark: ["investment", "pension", "insurance"].includes(k) ? false : true}));
   if (T.not_added_net_deposited) parts.push({label: TYPE_GROUP_NL.not_added, value: T.not_added_net_deposited, color: TYPE_COLOR.not_added, dark: true});
-  const mix = card("Verdeling", `${parts.length} soorten · woning en andere bezittingen staan onder Bezittingen`, {
+  const mix = card("Verdeling", `${parts.length} soort${parts.length > 1 ? "en" : ""} · woning en bezittingen en pensioen hebben hun eigen tabblad`, {
     table: () => table([{label: "Soort", get: r => r.label}, {label: "Waarde", num: true, get: r => eur(r.value)}], parts)});
   const VT0 = I.value_timeline, NHI = {};
-  for (const pnt of ((X("networth_history") || {}).points || [])) NHI[pnt.date.slice(0, 7)] = pnt.investments;
+  for (const pnt of ((X("networth_history") || {}).points || [])) NHI[pnt.date.slice(0, 7)] = pnt.investments == null || (pnt.pension == null && pensionValue()) ? null : pnt.investments - (pnt.pension || 0);
   const histVal = VT0.months.some(m => NHI[m] != null);
   const VT = histVal ? {...VT0, value: VT0.months.map((m, i) => NHI[m] != null ? NHI[m] : VT0.value[i])} : VT0;
   const c = card("Inleg en waarde over tijd", histVal ? "Waarde per maandeinde uit je brokerhistoriek × historische koersen, en je ingegeven waarden; inleg = netto gestort"
@@ -1088,11 +1222,15 @@ function copyText(txt, btn) {
   try { navigator.clipboard.writeText(txt).then(done, fallback); } catch (e) { fallback(); }
 }
 
-function networthCard(cls) {
+// r24: with `pillars` the card opens on the three pillars and can switch to private and company apart.
+function networthCard(cls, pillars) {
   const H = X("networth_history");
-  const c = card(HAS_BV ? "Vermogen over tijd · privé en BV apart" : "Vermogen over tijd", "Per maandeinde, gereconstrueerd uit bankhistoriek, brokerexports en maandkoersen; vanaf nu elke dag een momentopname", {cls,
+  const byPillar = pillars && state.hist === "pillars";
+  const c = card(byPillar ? "Vermogen over tijd · per pijler" : HAS_BV ? "Vermogen over tijd · privé en BV apart" : "Vermogen over tijd", "Per maandeinde, gereconstrueerd uit bankhistoriek, brokerexports en maandkoersen; vanaf nu elke dag een momentopname", {cls,
     table: () => table([{label: "Datum", get: r => dLabel(r.date)}, {label: "Vermogen", num: true, get: r => eur(r.total)},
-      ...(HAS_BV ? [{label: "Privé", num: true, get: r => r.personal == null ? "—" : eur(r.personal)}, {label: "BV", num: true, get: r => r.business == null ? "—" : eur(r.business)}] : []),
+      ...(byPillar ? [{label: "Dagelijks", num: true, get: r => eur(pillarHistory(r).daily)}, {label: "Beleggingen en vermogen", num: true, get: r => eur(pillarHistory(r).wealth)},
+        {label: "Pensioen", num: true, get: r => eur(pillarHistory(r).pension)}] : []),
+      ...(HAS_BV && !byPillar ? [{label: "Privé", num: true, get: r => r.personal == null ? "—" : eur(r.personal)}, {label: "BV", num: true, get: r => r.business == null ? "—" : eur(r.business)}] : []),
       {label: "Liquide", num: true, get: r => r.cash_personal == null && r.cash_business == null ? "—" : eur((r.cash_personal || 0) + (r.cash_business || 0))}, {label: "Beleggingen", num: true, get: r => eur(r.investments)},
       {label: "Leningen", num: true, get: r => r.loans ? "−" + eur(r.loans) : "—"},
       {label: "", get: r => r.source === "live" ? el("span", {class: "chip"}, "momentopname") : (r.carried_back && r.carried_back.length ? el("span", {class: "chip", title: "Saldo vóór de start van de bankhistoriek aangehouden: " + r.carried_back.join(", ")}, "geschat") : "")}],
@@ -1111,10 +1249,19 @@ function networthCard(cls) {
   if (ac.length) facts.push(`${ac.join(", ")}: vóór ${dLabel(H.total_from)} geteld aan de ingegeven inleg (geen historische waarde)`);
   if (est.length) facts.push(`${est.length} maanden geschat (${[...new Set(est.flatMap(p => p.carried_back))].join(", ")}: saldo vóór de bankhistoriek aangehouden)`);
   const split = HAS_BV && pts.some(p => p.business != null);
-  if (split) facts.unshift("BV inclusief de btw en VenB die ze nog moet betalen (die schatting staat enkel in de stand van vandaag)");
+  if (split || byPillar) facts.unshift((byPillar ? "Dagelijks met" : "BV inclusief") + " de btw en VenB die de BV nog moet betalen (die schatting staat enkel in de stand van vandaag)");
+  if (pillars) {
+    const seg = el("div", {class: "seg", role: "group", "aria-label": "Verdeling", style: "margin-bottom:10px"});
+    for (const [k, n] of [["pillars", "Per pijler"], ["scope", HAS_BV ? "Privé en BV" : "Liquide en beleggingen"]])
+      seg.append(el("button", {type: "button", "aria-pressed": String(k === state.hist), onclick: () => { state.hist = k; const nw = networthCard(cls, true); nw.root.style.cssText = c.root.style.cssText; c.root.replaceWith(nw.root); }}, n));
+    c.body.append(seg);
+  }
   const host = el("div");
   c.body.append(host, facts.length ? el("div", {class: "note", style: "margin-top:6px"}, facts.join(" · ")) : null);
-  requestAnimationFrame(() => lineChart(host, {labels: pts.map(p => p.date.slice(0, 7)), series: split ? [
+  const ph = pts.map(pillarHistory);
+  requestAnimationFrame(() => lineChart(host, {labels: pts.map(p => p.date.slice(0, 7)), series: byPillar ? [
+    {name: "Totaal", values: pts.map(p => p.total), color: "var(--s7)"},
+    ...PILLARS.map(x => ({name: x.name, values: ph.map(h => h[x.key]), color: x.color}))] : split ? [
     {name: "Privé", values: pts.map(p => p.personal), color: SERIES[0]},
     {name: "BV", values: pts.map(p => p.business), color: "var(--s6)"},
     {name: "Samen", values: pts.map(p => p.total), color: "var(--s7)"},
@@ -1634,6 +1781,18 @@ function viewPension(v) {
     v.append(c.root);
     requestAnimationFrame(() => segmented(c.body, [1, 2, 3, 4].map((k, i) => ({label: pil[k].label.split(":")[0], value: pil[k].monthly_today_eur || 0, color: SERIES[i]}))));
   }
+  const PC = D.investments.accounts.filter(a => a.type === "pension");
+  if (PC.length) {  // r24: moved here from Beleggingen
+    const pc = card("Je pensioencontracten", `${PC.length} contract${PC.length > 1 ? "en" : ""} · ${eur(pensionValue())} · ook als de BV de premie betaalt, is het kapitaal van jou`);
+    pc.body.append(table([
+      {label: "Contract", get: r => el("span", {}, nlName(r.name), r.provider && r.provider !== r.name ? el("span", {class: "muted"}, ` · ${r.provider}`) : null,
+        r.scope === "business" ? el("span", {class: "chip", style: "margin-left:6px"}, "premie via BV") : null)},
+      {label: "Waarde", num: true, get: r => valueCell(r)}, {label: "Op", num: true, get: r => r.value_entered ? dLabel(r.value_entered.date) : "—"},
+      {label: "Inleg", num: true, get: r => r.contributions == null ? "—" : eur(r.contributions)},
+      {label: "Rendement", num: true, get: r => gainCell(r)}], PC));
+    pc.root.style.marginTop = "14px";
+    v.append(pc.root);
+  }
   const g = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
   for (const k of [1, 2, 3, 4]) {
     const p = pil[k];
@@ -1887,6 +2046,8 @@ function render() {
   hideTip();
   renderTabs(); renderFilters();
   const v = document.getElementById("view"); v.textContent = "";
+  const band = pillarBand(sectionOf(state.tab));
+  if (band) v.append(band);
   VIEWS[state.tab](v);
 }
 let rt;

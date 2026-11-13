@@ -50,13 +50,17 @@ def snapshot(conn, today: date | None = None, position: dict | None = None) -> d
     if position is None:
         position = A.position(conn, date(today.year, 1, 1), today, today)
     nw, cash = position["net_worth"], position["cash"]
+    # r24: the pension part (None when the caller didn't pass the investments: the timeline then leaves it out)
+    bt = (position.get("investments") or {}).get("by_type")
+    pension = None if bt is None else (bt.get("pension") or 0)
     row = {"date": today.isoformat(), "source": "live", "cash_personal": r2(cash.get("personal")),
            "cash_business": r2(cash.get("business")), "investments": r2(nw.get("investments")),
            "property": r2((nw.get("property") or 0) + (nw.get("possessions") or 0)), "loans": r2(abs(nw.get("loans") or 0)), "total": r2(nw.get("total"))}
     conn.execute("INSERT OR REPLACE INTO networth_snapshots(date, source, cash_personal, cash_business, investments, "
                  "property, loans, total, parts_json) VALUES (?,?,?,?,?,?,?,?,?)",
-                 (*row.values(), json.dumps({**nw, "business_other": r2((nw.get("by_scope") or {}).get("business", 0)
-                                                                       - (cash.get("business") or 0))}, default=str)))
+                 (*row.values(), json.dumps({**nw, "pension": r2(pension) if pension is not None else None,
+                                             "business_other": r2((nw.get("by_scope") or {}).get("business", 0)
+                                                                  - (cash.get("business") or 0))}, default=str)))
     conn.commit()
     return row
 
@@ -192,6 +196,7 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
     home_back = {}                # property counted at its first value before that value's date
     accs = list(conn.execute("SELECT * FROM accounts WHERE source='asset'"))
     biz_names = {a["name"] for a in accs if a["scope"] == "business" and a["account_type"] != "pension"}
+    pension_names = {a["name"] for a in accs if a["account_type"] == "pension"}  # r24: the pension pillar apart
     for a in accs:
         typ = a["account_type"]
         fl, src = AS.contribution_flows(conn, a["id"])
@@ -318,6 +323,7 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
                  "not_counted": sorted(n for n in left_out if e not in (inv.get(n) or {})),
                  "at_contributions": sorted(n for n in left_out if e.isoformat()[:7] < (bank_first or "")[:7]
                                             and e in (inv.get(n) or {})),
+                 "pension": r2(sum((inv.get(n) or {}).get(e, 0.0) for n in pension_names)),
                  "business_other": r2(biz_other.get(e, 0.0) + sum((inv.get(n) or {}).get(e, 0.0) for n in biz_names))}
         if e in bank_set:
             cp = sum(s.get(e, 0.0) for k, s in bank.items() if scopes[k] == "personal")
@@ -356,6 +362,7 @@ def timeline(conn, months: int | None = None) -> dict:
         if cur is None or (r["source"] == "live" and (cur["source"] != "live" or r["date"] >= cur["date"])) or \
                 (r["source"] == cur["source"] and r["date"] >= cur["date"]):
             pts[m] = dict(r)
+    pension_names = {r[0] for r in conn.execute("SELECT name FROM accounts WHERE source='asset' AND account_type='pension'")}
     ms = sorted(pts)
     if months:
         ms = ms[-months:]
@@ -378,6 +385,14 @@ def timeline(conn, months: int | None = None) -> dict:
                 pj = json.loads(pts[m]["parts_json"] or "{}")
             except ValueError:
                 pj = {}
+        # r24: the pension part, so the total can be shown as day-to-day / investments and wealth / pension; rows
+        # stored before r24 have no "pension": a reconstruction still has its accounts, an old live snapshot not
+        if pj.get("pension") is not None:
+            pt["pension"] = pj["pension"]
+        elif pts[m]["source"] == "reconstructed":
+            pt["pension"] = r2(sum(v or 0 for n, v in (pj.get("accounts") or {}).items() if n in pension_names))
+        else:
+            pt["pension"] = None
         if pj.get("no_bank_data"):
             pt["no_bank_data"] = True
         # r20: private and company apart (the company part: its cash plus what else its accounts hold)

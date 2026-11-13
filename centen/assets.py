@@ -634,12 +634,13 @@ def summary(conn, today: date | None = None) -> dict:
             "totals": totals}
 
 
-def timeline(conn, today: date | None = None) -> dict:
+def timeline(conn, today: date | None = None, exclude: tuple[str, ...] = ()) -> dict:
     """Month-end contributions (all investment-type accounts and brokers not added yet) and, from the first value
-    you entered, the estimated value of the same set."""
+    you entered, the estimated value of the same set. `exclude`: account types left out (r24: the dashboard shows
+    the pension contracts on their own tab)."""
     from .analytics import add_months
     today = _today(today)
-    accs = [r for r in _rows(conn) if r["account_type"] in INVESTING_ASSET_TYPES]
+    accs = [r for r in _rows(conn) if r["account_type"] in INVESTING_ASSET_TYPES and r["account_type"] not in exclude]
     data = {}
     for a in accs:
         fl, src = contribution_flows(conn, a["id"])

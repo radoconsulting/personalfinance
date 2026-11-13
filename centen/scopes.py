@@ -58,6 +58,30 @@ def corporate_tax_due(conn, today: date) -> dict:
             "amount": r2(max(0.0, tax - paid)), "reduced_rate": yearly_rem >= R.CIT["min_remuneration"]}
 
 
+def pillars(P: dict, B: dict | None, biz: dict | None) -> dict:
+    """The same total cut the other way (r24): day-to-day money, investments and wealth, pension.
+
+    daily   = cash on the bank accounts (the company's after the VAT and corporate tax it still owes)
+    wealth  = investments (private + company, incl. tak 21/23) + home and possessions − loans
+    pension = pension contracts (2nd/3rd pillar), locked until the pension date
+    The three add up to the total of `split`.
+    """
+    owed = (biz or {}).get("owed_estimate") or 0.0
+    b = B or {k: 0.0 for k in P}
+    daily = {"cash_personal": P["cash"], "cash_business": b["cash"] if B else None,
+             "owed_business": -owed if B else None}
+    daily["value"] = P["cash"] + (b["cash"] - owed if B else 0.0)
+    owned = P["property"] + P["possessions"] + b["property"] + b["possessions"]
+    loans = P["loans"] + b["loans"]
+    wealth = {"investments_personal": P["investments"], "investments_business": b["investments"] if B else None,
+              "property": P["property"] + b["property"], "possessions": P["possessions"] + b["possessions"],
+              "loans": -loans, "owned_net": owned - loans}
+    wealth["value"] = P["investments"] + b["investments"] + owned - loans
+    pension = {"value": P["pension"]}
+    out = {"daily": daily, "wealth": wealth, "pension": pension}
+    return {k: {kk: r2(vv) for kk, vv in v.items()} for k, v in out.items()}
+
+
 def split(conn, today: date | None = None) -> dict:
     from . import remuneration as R
     today = today or date.today()
@@ -108,6 +132,7 @@ def split(conn, today: date | None = None) -> dict:
         out["business"] = None
     total = p_net + (out["business"]["net_worth"] if out["business"] else 0.0)
     out["total"] = r2(total)
+    out["pillars"] = pillars(P, B if has_bv else None, out["business"])
     out["notes"] = ("Privé = van jou: vrij (liquide en beleggingen), vast tot je pensioen (pensioencontracten) en in je "
                     "woning en bezittingen min leningen. BV = van de vennootschap: pas van jou na een uitkering, en "
                     "dan na roerende voorheffing. ‘Nog te betalen’ is een schatting: btw aan 21 % op de omzet sinds het "

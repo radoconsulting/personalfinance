@@ -130,3 +130,54 @@ def test_fiche_return_used(conn):
     a = pension.overview(conn, T)["pillars"][1]["accounts"][0]
     assert a["return_assumed"] == pytest.approx(0.0665) and a["return_from_fiche"]
     assert a["expected_at_retirement"] == 959662.61
+
+
+# --- r24: the total cut into day-to-day / investments and wealth / pension ----------------------------------------
+
+def test_pillars_add_up_to_the_total(conn):
+    s = scopes.split(conn, T)
+    pl, P, B = s["pillars"], s["personal"], s["business"]
+    assert pl["daily"]["value"] + pl["wealth"]["value"] + pl["pension"]["value"] == pytest.approx(s["total"], abs=0.05)
+    # day-to-day: the bank accounts, the company's after the tax it still owes
+    assert pl["daily"]["value"] == pytest.approx(P["cash"] + B["free_cash"], abs=0.05)
+    assert pl["daily"]["owed_business"] == pytest.approx(-B["owed_estimate"], abs=0.05)
+    assert pl["pension"]["value"] == pytest.approx(P["pension"], abs=0.05)
+    assert pl["wealth"]["owned_net"] == pytest.approx(pl["wealth"]["property"] + pl["wealth"]["possessions"]
+                                                      + pl["wealth"]["loans"], abs=0.05)
+
+
+def test_pillars_without_company(tmp_path):
+    os.environ["CENTEN_HOME"] = str(tmp_path)
+    c = db.connect(str(tmp_path / "t.db"))
+    demo.generate_full(c, T)
+    c.execute("DELETE FROM accounts WHERE scope='business'")
+    s = scopes.split(c, T)
+    pl = s["pillars"]
+    assert pl["daily"]["cash_business"] is None and pl["daily"]["owed_business"] is None
+    assert sum(pl[k]["value"] for k in ("daily", "wealth", "pension")) == pytest.approx(s["total"], abs=0.05)
+
+
+def test_history_has_the_pension_part(conn):
+    networth.reconstruct(conn, T)
+    networth.snapshot(conn, T)
+    pts = networth.timeline(conn)["points"]
+    assert pts and all("pension" in p for p in pts)
+    live = [p for p in pts if p["source"] == "live"][-1]
+    pens = A.position(conn, today=T)["investments"]["by_type"].get("pension") or 0
+    assert live["pension"] == pytest.approx(pens, abs=0.05)
+    assert pens > 0  # the demo has a pension contract
+    assert all(p["pension"] is None or 0 <= p["pension"] <= (p["investments"] or 0) + 0.05 for p in pts)
+
+
+def test_dashboard_snapshot_keeps_the_pension_part(conn, tmp_path):
+    from centen import dashboard
+    networth.reconstruct(conn, T)
+    data = dashboard.collect(conn, T)
+    pos = {"net_worth": data["net_worth"], "cash": data["periods"][data["meta"]["default_period"]]["cash"],
+           "investments": {"by_type": data["investments"]["totals"]["by_type"]}}
+    networth.snapshot(conn, T, pos)
+    live = [p for p in networth.timeline(conn)["points"] if p["source"] == "live"][-1]
+    assert live["pension"] == pytest.approx(data["investments"]["totals"]["by_type"]["pension"], abs=0.05)
+    # without the investments the pension part is unknown, not zero
+    networth.snapshot(conn, T, {"net_worth": data["net_worth"], "cash": pos["cash"]})
+    assert [p for p in networth.timeline(conn)["points"] if p["source"] == "live"][-1]["pension"] is None

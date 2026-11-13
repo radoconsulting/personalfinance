@@ -104,7 +104,7 @@ def collect(conn, today: date | None = None) -> dict:
             "loans": asum["loans"],            # loans with the amount still owed
             "not_added": asum["not_added"],    # brokers seen in transfers, not added yet
             "totals": asum["totals"],
-            "value_timeline": AS.timeline(conn, today),
+            "value_timeline": AS.timeline(conn, today, exclude=("pension",)),
             "positions": positions or None,    # latest holdings per account (from exports or entered)
             "portfolio": pf,                   # from broker exports: holdings with cost, results, years, XIRR
             "valuation": {"as_of": asum["totals"]["oldest_value"], "market_value": asum["totals"]["investments_value"],
@@ -213,7 +213,8 @@ def _daily(conn, today: date, data: dict) -> None:
     if today != date.today():
         return  # building for another day (tests, a look back): don't write snapshots
     _safe(networth.reconstruct, conn, today)
-    pos = {"net_worth": data["net_worth"], "cash": data["periods"][data["meta"]["default_period"]]["cash"]}
+    pos = {"net_worth": data["net_worth"], "cash": data["periods"][data["meta"]["default_period"]]["cash"],
+           "investments": {"by_type": data["investments"]["totals"]["by_type"]}}  # r24: for the pension part
     _safe(networth.snapshot, conn, today, pos)
 
 
