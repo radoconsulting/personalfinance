@@ -1321,8 +1321,8 @@ function viewPension(v) {
       c.body.append(el("div", {class: "empty"}, k === 3 ? "Geen pensioensparen of langetermijnsparen gevonden." : "Nog geen rekeningen in deze pijler."));
     } else {
       c.body.append(table([{label: "Rekening", get: r => r.name + (r.stale ? " (oude waarde)" : "")},
-        {label: "Nu", num: true, get: r => r.type === "contributions" ? "—" : eur(r.value)}, {label: k === 4 ? "Inleg / jaar" : "Premie / jaar", num: true, get: r => r.premium_assumed ? eur(r.premium_assumed) : "—"},
-        {label: "Bij pensioen*", num: true, get: r => eur(r.expected_today_eur ?? r.projected_today_eur)}], p.accounts));
+        {label: "Nu", num: true, get: r => r.type === "contributions" || r.type === "drawdown" ? "—" : eur(r.value)}, {label: k === 4 ? "Inleg / jaar" : "Premie / jaar", num: true, get: r => r.premium_assumed ? (r.premium_assumed < 0 ? eurS(r.premium_assumed) : eur(r.premium_assumed)) : "—"},
+        {label: "Bij pensioen*", num: true, get: r => r.type === "drawdown" ? eurS(r.projected_today_eur) : eur(r.expected_today_eur ?? r.projected_today_eur)}], p.accounts));
       c.body.append(el("div", {class: "note", style: "margin-top:6px"}, `* euro van vandaag, ${pct(p.accounts[0].return_assumed)} rendement per jaar` +
         (p.accounts.some(a => a.expected_at_retirement) ? "; waar ingevuld: bedrag van de pensioenfiche" : "") + (k === 4 ? "" : ` · na belasting ${eur(p.after_tax_today_eur)}`) + ` · ${eur(p.monthly_today_eur)} / maand`));
     }
@@ -1352,6 +1352,8 @@ function viewPension(v) {
   const pr = O.profile;
   v.append(el("div", {style: "margin-top:14px"}, notesCard("Aannames (aanpasbaar via Claude: set_pension_profile)", [
     `Pensioenleeftijd ${pr.retirement_age}; ${pr.birth_date ? "geboren " + dLabel(pr.birth_date) : "geboortedatum nog niet ingevuld"}.`,
+    O.stop_work_age < pr.retirement_age ? `Je stopt met werken op ${O.stop_work_age}: premies en nieuwe inleg lopen tot dan (nog ${num1.format(O.years_paying)} jaar), daarna leef je tot je pensioen van je eigen vermogen.`
+      : `Premies en nieuwe inleg lopen door tot je pensioen. Vroeger stoppen? Vraag het Claude (stop_work_age) of probeer het in de Planner.`,
     `Rendement 2e/3e pijler ${pct(pr.return_pension)}, eigen beleggingen ${pct(pr.return_investments)}, inflatie ${pct(pr.inflation)} per jaar.`,
     `2e pijler: ongeveer ${pct(pr.payout_tax)} belasting en bijdragen bij uitkering, verdeeld tot ${pr.live_until} jaar. Eigen beleggingen: ${pct(pr.withdrawal_rate)} per jaar opnemen.`,
     `Pensioensparen ${O.limits_2026 ? "2026: max " + eur(O.limits_2026.pension_saving["30%"]) + " (30 %) of " + eur(O.limits_2026.pension_saving["25%"]) + " (25 %) per persoon" : ""}.`,
@@ -1359,6 +1361,20 @@ function viewPension(v) {
 }
 
 // The same model as centen/planner.py (keep both in step).
+function planPensionCapital(I, stop, inf) {
+  const accs = I.pension_accounts, age0 = I.age, retAge = I.retirement_age || 67;
+  if (!accs || age0 == null) return I.pension_capital_at_retirement_today_eur || 0;
+  const years = Math.max(0, retAge - age0), paying = Math.max(0, Math.min(years, (stop ?? retAge) - age0));
+  let total = 0;
+  for (const a of accs) {
+    const r = a.return, g = (1 + r) ** paying;
+    let fv = a.value * g + (r ? a.premium * (g - 1) / r : a.premium * paying);
+    fv *= (1 + r) ** (years - paying);
+    if (a.expected && paying >= years - 0.05) fv = a.expected;
+    total += fv / (1 + inf) ** years * (1 - a.tax);
+  }
+  return total;
+}
 function planProject(I, sc) {
   const ret = sc.ret ?? I.return, inf = sc.inf ?? I.inflation, wr = sc.wr ?? I.withdrawal_rate;
   const real = (1 + ret) / (1 + inf) - 1;
@@ -1374,7 +1390,10 @@ function planProject(I, sc) {
   if (payoff) { saving += instalNow; loans = []; }
   const age0 = I.age, retAge = I.retirement_age || 67, endAge = I.live_until || 90;
   const n = age0 != null ? Math.floor(endAge - age0) + 1 : 40;
-  const pensionY = (I.legal_pension_monthly || 0) * 12, pcap = I.pension_capital_at_retirement_today_eur || 0;
+  const pensionY = (I.legal_pension_monthly || 0) * 12;
+  let stop = sc.stop !== undefined ? sc.stop : (I.stop_work_age ?? null);
+  if (stop != null && stop >= retAge) stop = null;
+  const pcap = planPensionCapital(I, stop, inf);
   const year0 = +I.today.slice(0, 4);
   const rows = []; let fi = null, depleted = null;
   for (let i = 0; i <= n; i++) {
@@ -1382,7 +1401,7 @@ function planProject(I, sc) {
     const ended = loans.filter(x => x.ends && +x.ends.slice(0, 4) < y);
     const spend = baseSpend - ended.reduce((a, x) => a + x.instalment_monthly * 12 * (1 + spc), 0);
     const retired = age != null && age >= retAge;
-    const working = !retired && (sc.stop == null || age == null || age < sc.stop);
+    const working = !retired && (stop == null || age == null || age < stop);
     const need = Math.max(0, spend - (retired ? pensionY : 0));
     if (fi == null && capital > 0 && capital * wr >= need) fi = {year: y, age};
     rows.push({year: y, age, capital, spending: spend, target: need / wr});
@@ -1417,7 +1436,7 @@ function viewPlanner(v) {
   slider("ret", "Rendement per jaar", 0, 10, 0.5, +(I.return * 100).toFixed(1), pctF);
   slider("inf", "Inflatie per jaar", 0, 5, 0.5, +(I.inflation * 100).toFixed(1), pctF);
   slider("wr", "Opname per jaar (van je vermogen)", 2, 6, 0.25, +(I.withdrawal_rate * 100).toFixed(2), pctF);
-  if (I.age != null) slider("stop", "Stoppen met werken op", Math.ceil(I.age), I.retirement_age, 1, I.retirement_age, x => x >= I.retirement_age ? "pensioenleeftijd" : x + " jaar");
+  if (I.age != null) slider("stop", "Stoppen met werken (en sparen) op", Math.ceil(I.age), I.retirement_age, 1, Math.min(I.stop_work_age ?? I.retirement_age, I.retirement_age), x => x >= I.retirement_age ? "pensioenleeftijd" : x + " jaar");
   if ((I.loans || []).length) {
     const cb = el("input", {type: "checkbox"}); cb.checked = !!S.payoff;
     cb.addEventListener("change", () => { S.payoff = cb.checked; draw(); });
@@ -1430,7 +1449,7 @@ function viewPlanner(v) {
   function draw() {
     out.textContent = "";
     const sc = {extra: S.extra || 0, spend: (S.spend || 0) / 100, ret: S.ret != null ? S.ret / 100 : undefined, inf: S.inf != null ? S.inf / 100 : undefined,
-      wr: S.wr != null ? S.wr / 100 : undefined, stop: S.stop != null && S.stop < I.retirement_age ? S.stop : null, payoff: S.payoff};
+      wr: S.wr != null ? S.wr / 100 : undefined, stop: S.stop != null ? (S.stop < I.retirement_age ? S.stop : null) : undefined, payoff: S.payoff};
     const r = planProject(I, sc);
     out.append(el("div", {class: "grid g4", style: "margin-top:14px"},
       el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Financieel onafhankelijk"),
@@ -1457,9 +1476,10 @@ function viewPlanner(v) {
     {label: "Bij pensioen", num: true, get: r => eur(r.capital_at_retirement)}, {label: "Op het einde", num: true, get: r => r.depleted ? "op " + (r.depleted.age != null ? Math.floor(r.depleted.age) + " jaar" : r.depleted.year) : eur(r.end_capital)}], PL.scenarios));
   g.append(cs.root);
   g.append(notesCard("Vertrekpunt (uit je gegevens)", [
-    `Leeftijd ${I.age != null ? Math.floor(I.age) : "onbekend (geboortedatum in het pensioenprofiel)"} · pensioen op ${I.retirement_age} · wettelijk pensioen ${I.legal_pension_monthly != null ? eur(I.legal_pension_monthly) + " / maand" : "niet ingevuld"}.`,
+    `Leeftijd ${I.age != null ? Math.floor(I.age) : "onbekend (geboortedatum in het pensioenprofiel)"} · ${I.stop_work_age < I.retirement_age ? "stoppen met werken op " + I.stop_work_age + " · " : ""}pensioen op ${I.retirement_age} · wettelijk pensioen ${I.legal_pension_monthly != null ? eur(I.legal_pension_monthly) + " / maand" : "niet ingevuld"}.`,
     `Cash privé ${eur(I.cash_personal)}, beleggingen privé ${eur(I.investments_personal)}` + (I.include_company ? `, BV ${eur((I.cash_company || 0) + (I.investments_company || 0))} (telt na ${pct(I.company_extraction_tax)} belasting bij uitkeren)` : "") + ".",
-    `Pensioenkapitaal 2e/3e pijler nu ${eur(I.pension_capital_now)}; vanaf je pensioen ${eur(I.pension_capital_at_retirement_today_eur)} na belasting.`,
+    `Pensioenkapitaal 2e/3e pijler nu ${eur(I.pension_capital_now)}; vanaf je pensioen na belasting, met premies zolang je werkt (de schuif ‘stoppen’ telt mee).`,
+    "Sparen en extra sparen lopen enkel zolang je werkt; daarna leef je van je vermogen tot je pensioen.",
     `Sparen ${eur(I.monthly_saving)} per maand (inkomen − uitgaven, privé + BV, laatste 12 maanden) · uitgaven ${eur(I.annual_spending)} per jaar.`,
     (I.loans || []).length ? `Leningen: ${I.loans.map(l => `${l.name} ${eur(l.instalment_monthly)}/maand tot ${dLabel(l.ends)}`).join("; ")} (de uitgaven dalen als ze aflopen).` : "Geen leningen met een aflossingsplan.",
     PL.disclaimer]));

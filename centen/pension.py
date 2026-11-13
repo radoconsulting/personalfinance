@@ -25,6 +25,7 @@ META_KEY = "pension_profile"
 DEFAULTS = {
     "birth_date": None,
     "retirement_age": 67,             # legal pension age from 2030
+    "stop_work_age": None,            # stop working (and saving) earlier than the pension; None = at the pension
     "legal_pension_monthly": None,    # estimate from mypension.be, gross per month, today's euros
     "partner_legal_pension_monthly": None,
     "return_pension": 0.025,          # pillars 2 and 3, nominal per year
@@ -90,6 +91,10 @@ def set_profile(conn, reset: list[str] | None = None, **changes) -> dict:
                 v = v / 100
             if not -0.5 < v < 0.5:
                 raise ValueError(f"{k} looks wrong: {v}")
+        elif k == "stop_work_age":
+            v = int(v)
+            if not 25 <= v <= 110:
+                raise ValueError(f"stop_work_age looks wrong: {v}")
         elif k in ("retirement_age", "live_until"):
             v = int(v)
             if not 50 <= v <= 110:
@@ -130,11 +135,14 @@ def pillar_of(acc: dict, settings: dict) -> int:
     return 4
 
 
-def _fv(value: float, premium: float, r: float, years: float) -> float:
+def _fv(value: float, premium: float, r: float, years: float, paying: float | None = None) -> float:
+    """Value after `years` with a yearly premium paid during the first `paying` years (default: all of them)."""
     if years <= 0:
         return value
-    g = (1 + r) ** years
-    return value * g + (premium * (g - 1) / r if r else premium * years)
+    n = years if paying is None else max(0.0, min(paying, years))
+    g = (1 + r) ** n
+    fv = value * g + (premium * (g - 1) / r if r else premium * n)
+    return fv * (1 + r) ** (years - n)
 
 
 def _premiums(conn, acc_name: str, today: date) -> tuple[float, float]:
@@ -257,6 +265,13 @@ def overview(conn, today: date | None = None) -> dict:
         ret_date = A.add_months(date(b.year + p["retirement_age"], b.month, 1), 1)  # first day of the month after
         years = max(0.0, (ret_date - today).days / 365.25)
     infl = (1 + p["inflation"]) ** (years or 0)
+    # Premiums and new investments only while you work: until stop_work_age (default the pension date).
+    stop_age = p.get("stop_work_age") or p["retirement_age"]
+    paying = None
+    if years is not None:
+        age_now = (today - date.fromisoformat(p["birth_date"])).days / 365.25
+        paying = max(0.0, min(years, stop_age - age_now))
+    early = years is not None and paying < years - 0.05
 
     pillars = {2: [], 3: [], 4: []}
     p4_accounts = []
@@ -273,8 +288,8 @@ def overview(conn, today: date | None = None) -> dict:
         last12, ytd = _premiums(conn, a["name"], today)
         premium = s.get("premium_yearly", last12 if pil != 4 else 0.0)
         r = p["return_pension"] if pil in (2, 3) else p["return_investments"]
-        proj = _fv(value, premium, r, years) if years is not None else None
-        exp = s.get("expected_at_retirement")
+        proj = _fv(value, premium, r, years, paying) if years is not None else None
+        exp = s.get("expected_at_retirement") if not early else None  # the fiche assumes premiums until the pension
         row = {"name": a["name"], "provider": a.get("provider"), "type": a["type"], "pillar": pil, "value": r2(value),
                "value_date": (a.get("value_entered") or {}).get("date"), "contributions": a.get("contributions"),
                "premium_last_12m": r2(last12), "premium_this_year": r2(ytd), "premium_assumed": r2(premium),
@@ -286,22 +301,34 @@ def overview(conn, today: date | None = None) -> dict:
         pillars[pil].append(row)
 
     inv = investing_pattern(conn, today, p, [{"id": AS.find(conn, a["name"])["id"]} for a in p4_accounts])
-    if inv["yearly"] and years is not None:
-        proj = _fv(0.0, inv["yearly"], p["return_investments"], years)
-        pillars[4].append({"name": "Nieuwe inleg tot je pensioen", "provider": None, "type": "contributions", "pillar": 4,
+    if inv["yearly"] and years is not None and paying > 0:
+        proj = _fv(0.0, inv["yearly"], p["return_investments"], years, paying)
+        pillars[4].append({"name": "Nieuwe inleg tot je pensioen" if not early else f"Nieuwe inleg tot je {stop_age} jaar", "provider": None, "type": "contributions", "pillar": 4,
                            "value": 0.0, "value_date": None, "contributions": None, "premium_last_12m": None,
                            "premium_this_year": None, "premium_assumed": inv["yearly"], "paid_by": ["personal"],
                            "return_assumed": p["return_investments"], "projected_nominal": r2(proj),
                            "projected_today_eur": r2(proj / infl), "expected_at_retirement": None,
                            "expected_today_eur": None, "stale": False})
 
+    sp = spending_profile(conn, today, p)
+    spend_m = sp["monthly"] or None
+    if early and spend_m:
+        # Between stopping and the pension you live from your own capital (pillar 4).
+        gap = years - paying
+        rr = (1 + p["return_investments"]) / (1 + p["inflation"]) - 1
+        used = spend_m * 12 * (((1 + rr) ** gap - 1) / rr if rr else gap)
+        pillars[4].append({"name": f"Leven van je vermogen van {stop_age} tot {p['retirement_age']} jaar", "provider": None,
+                           "type": "drawdown", "pillar": 4, "value": 0.0, "value_date": None, "contributions": None,
+                           "premium_last_12m": None, "premium_this_year": None, "premium_assumed": r2(-spend_m * 12),
+                           "paid_by": ["personal"], "return_assumed": p["return_investments"],
+                           "projected_nominal": r2(-used * infl), "projected_today_eur": r2(-used),
+                           "expected_at_retirement": None, "expected_today_eur": None, "stale": False})
+
     def cap(rows, key_nom, key_real):
         nom = sum((x["expected_at_retirement"] or x[key_nom] or 0) for x in rows)
         real = sum((x["expected_today_eur"] or x[key_real] or 0) for x in rows)
         return r2(nom), r2(real)
 
-    sp = spending_profile(conn, today, p)
-    spend_m = sp["monthly"] or None
     payout_years = max(1, p["live_until"] - p["retirement_age"])
     out_p = []
     monthly_income = 0.0
@@ -315,7 +342,7 @@ def overview(conn, today: date | None = None) -> dict:
                       "kapitaal na 8 % belasting op 60 jaar") + f", gespreid over {payout_years} jaar"
         else:
             after_tax = real
-            per_month = (real or 0) * p["withdrawal_rate"] / 12 if years is not None else None
+            per_month = max(0.0, real or 0) * p["withdrawal_rate"] / 12 if years is not None else None
             method = f"{p['withdrawal_rate'] * 100:.1f} % van het kapitaal per jaar opnemen (het kapitaal blijft)"
         monthly_income += per_month or 0
         out_p.append({"pillar": pil, "label": {2: "2e pijler: aanvullend pensioen via werk",
@@ -356,6 +383,11 @@ def overview(conn, today: date | None = None) -> dict:
                            "text": f"{x['name']} wordt betaald door je vennootschap: de premie is enkel aftrekbaar "
                                    "binnen de 80 %-regel (wettelijk + aanvullend pensioen samen max. 80 % van je "
                                    "laatste bruto jaarbezoldiging). De verzekeraar berekent die ruimte elk jaar."})
+    p4_real = next((x["projected_today_eur"] for x in out_p if x["pillar"] == 4), 0) or 0
+    if early and p4_real < 0:
+        checks.append({"kind": "runs_out", "severity": "warning",
+                       "text": f"Als je op {stop_age} stopt, is je eigen vermogen op vóór je pensioen op "
+                               f"{p['retirement_age']}: zie de Planner voor wanneer."})
     if needs:
         checks.append({"kind": "profile", "severity": "info",
                        "text": "Nodig voor de projectie: " + ", ".join(needs) + " (set_pension_profile)."})
@@ -364,6 +396,7 @@ def overview(conn, today: date | None = None) -> dict:
         "today": today.isoformat(), "profile": {k: v for k, v in p.items() if k != "accounts"},
         "account_settings": p["accounts"], "retirement_date": ret_date.isoformat() if ret_date else None,
         "years_to_retirement": round(years, 1) if years is not None else None,
+        "stop_work_age": stop_age, "years_paying": round(paying, 1) if paying is not None else None,
         "age_now": round((today - date.fromisoformat(p["birth_date"])).days / 365.25, 1) if p["birth_date"] else None,
         "pillars": out_p, "monthly_income_today_eur": r2(total_m) if years is not None else None,
         "spending_monthly_now": r2(spend_m), "spending_profile": sp, "investing": inv,

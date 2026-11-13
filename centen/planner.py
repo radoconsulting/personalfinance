@@ -63,6 +63,12 @@ def inputs(conn, today: date | None = None) -> dict:
         "cash_personal": r2(tot.get("personal")), "cash_company": r2(tot.get("business")),
         "investments_personal": r2(personal_inv), "investments_company": r2(company_inv),
         "pension_capital_now": r2(p23_now), "pension_capital_at_retirement_today_eur": r2(p23_at_ret),
+        "stop_work_age": prof.get("stop_work_age") or prof["retirement_age"],
+        # Pillar 2/3 accounts, so a scenario that stops working earlier also stops their premiums.
+        "pension_accounts": [{"name": a["name"], "value": a["value"] or 0, "premium": a["premium_assumed"] or 0,
+                              "return": a["return_assumed"], "tax": prof["payout_tax"] if x["pillar"] == 2 else 0.08,
+                              "expected": a["expected_at_retirement"]}
+                             for x in p23 for a in x["accounts"]],
         "legal_pension_monthly": prof.get("legal_pension_monthly"),
         "monthly_saving": r2(saving_m), "annual_spending": r2(spend_y),
         "one_offs_added_back_monthly": r2(offs_saving), "one_offs": sp["one_offs"],
@@ -75,6 +81,26 @@ def inputs(conn, today: date | None = None) -> dict:
                  "instalments included. Pension capital (pillars 2/3) is counted from the "
                  "pension date, after tax. Company money counts after the extraction tax.",
     }
+
+
+def pension_capital(inp: dict, stop_age: float | None, inflation: float) -> float:
+    """Pillar 2/3 capital at the pension date after tax, in today's euros, with premiums until stop_age."""
+    accs = inp.get("pension_accounts")
+    age0, ret_age = inp.get("age"), inp.get("retirement_age") or 67
+    if accs is None or age0 is None:
+        return inp.get("pension_capital_at_retirement_today_eur") or 0.0
+    years = max(0.0, ret_age - age0)
+    paying = max(0.0, min(years, (stop_age if stop_age is not None else ret_age) - age0))
+    total = 0.0
+    for a in accs:
+        r = a["return"]
+        g = (1 + r) ** paying
+        fv = a["value"] * g + (a["premium"] * (g - 1) / r if r else a["premium"] * paying)
+        fv *= (1 + r) ** (years - paying)
+        if a.get("expected") and paying >= years - 0.05:
+            fv = a["expected"]  # from the pension fiche, which assumes premiums until the pension
+        total += fv / (1 + inflation) ** years * (1 - a["tax"])
+    return total
 
 
 def project(inp: dict, stop_work_age: float | None = None, extra_monthly_saving: float = 0.0,
@@ -109,7 +135,11 @@ def project(inp: dict, stop_work_age: float | None = None, extra_monthly_saving:
     end_age = inp.get("live_until") or 90
     n = years or (int(end_age - age0) + 1 if age0 is not None else 40)
     pension_y = (inp.get("legal_pension_monthly") or 0) * 12
-    pcap = inp.get("pension_capital_at_retirement_today_eur") or 0
+    if stop_work_age is None:
+        stop_work_age = inp.get("stop_work_age")
+    if stop_work_age is not None and stop_work_age >= ret_age:
+        stop_work_age = None
+    pcap = pension_capital(inp, stop_work_age, inf)
     rows, fi_year, fi_age, depleted = [], None, None, None
     for i in range(n + 1):
         y = today.year + i

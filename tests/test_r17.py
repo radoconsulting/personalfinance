@@ -159,7 +159,18 @@ def test_planner_js_engine_matches_python(full, tmp_path):
     inp = planner.inputs(full, TODAY)
     inp["loans"] = [{"name": "L", "instalment_monthly": 800, "ends": "2034-12-18", "outstanding": 60000}]
     tpl = dashboard.TEMPLATE.read_text(encoding="utf-8")
-    js = tpl[tpl.index("function planProject"):tpl.index("function viewPlanner")]
+    js = tpl[tpl.index("function planPensionCapital"):tpl.index("function viewPlanner")]
+    pension.set_profile(full, accounts={"IPT NN": {"premium_yearly": 5000}})
+    inp = planner.inputs(full, TODAY)
+    inp["loans"] = [{"name": "L", "instalment_monthly": 800, "ends": "2034-12-18", "outstanding": 60000}]
+    early = dict(inp, stop_work_age=58)
+    for i2, py, jsc in [(early, {}, {}), (early, {"stop_work_age": 67}, {"stop": None})]:
+        p = planner.project(i2, **py)
+        code = js + f"\nconst r=planProject({json.dumps(i2)},{json.dumps(jsc)});" \
+                    "console.log(JSON.stringify([r.fi&&r.fi.year, r.atRet, r.rows[r.rows.length-1].capital]))"
+        out = json.loads(subprocess.run(["node", "-e", code], capture_output=True, text=True, check=True).stdout)
+        assert out[0] == p["fi_year"] and out[1] == pytest.approx(p["capital_at_retirement"], abs=1)
+        assert out[2] == pytest.approx(p["end_capital"], abs=1)
     for py, jsc in [({}, {}), ({"extra_monthly_saving": 500}, {"extra": 500}), ({"pay_off_loans_now": True}, {"payoff": True}),
                     ({"stop_work_age": 50, "return_": 0.04}, {"stop": 50, "ret": 0.04}),
                     ({"spending_change_pct": -0.2}, {"spend": -0.2})]:
@@ -311,3 +322,37 @@ def test_investing_pattern_feeds_pillar_4(full):
     pension.set_profile(full, investing_yearly=0)
     p4 = [p for p in pension.overview(full, TODAY)["pillars"] if p["pillar"] == 4][0]
     assert not any(r["type"] == "contributions" for r in p4["accounts"])
+
+
+# --- r17c: saving stops when you stop working ----------------------------------------------------------------
+
+def test_stop_work_age_stops_premiums_and_investing(full):
+    pension.set_profile(full, birth_date="1988-01-28", legal_pension_monthly=1800,
+                        accounts={"IPT NN": {"premium_yearly": 5000, "expected_at_retirement": 400000}},
+                        investing_yearly=30000)
+    full_career = pension.overview(full, TODAY)
+    pension.set_profile(full, stop_work_age=55)
+    early = pension.overview(full, TODAY)
+    assert early["stop_work_age"] == 55 and 16 < early["years_paying"] < 17
+    p2 = lambda o: [p for p in o["pillars"] if p["pillar"] == 2][0]
+    p4 = lambda o: [p for p in o["pillars"] if p["pillar"] == 4][0]
+    ipt_full, ipt_early = p2(full_career)["accounts"][0], p2(early)["accounts"][0]
+    assert ipt_full["expected_at_retirement"] == 400000 and ipt_early["expected_at_retirement"] is None
+    assert ipt_early["projected_nominal"] == pytest.approx(
+        pension._fv(100000, 5000, 0.025, early["years_to_retirement"], early["years_paying"]), rel=0.005)
+    assert ipt_early["projected_nominal"] < pension._fv(100000, 5000, 0.025, early["years_to_retirement"])
+    rows = {r["type"]: r for r in p4(early)["accounts"]}
+    assert rows["contributions"]["name"] == "Nieuwe inleg tot je 55 jaar"
+    assert rows["drawdown"]["projected_today_eur"] < 0
+    assert p4(early)["projected_today_eur"] < p4(full_career)["projected_today_eur"]
+    # the planner follows the profile: no saving after 55 and smaller pension capital
+    inp = planner.inputs(full, TODAY)
+    assert inp["stop_work_age"] == 55
+    pr = planner.project(inp)
+    after = [r for r in pr["years"] if r["age"] and 56 <= r["age"] < 66]
+    assert after and all(r["phase"] == "living off capital" for r in after)
+    assert planner.pension_capital(inp, 55, inp["inflation"]) < planner.pension_capital(inp, None, inp["inflation"])
+    assert planner.pension_capital(inp, None, inp["inflation"]) == pytest.approx(
+        400000 / (1 + inp["inflation"]) ** (67 - inp["age"]) * (1 - 0.165), rel=0.01)
+    pension.set_profile(full, reset=["stop_work_age"])
+    assert pension.overview(full, TODAY)["stop_work_age"] == 67

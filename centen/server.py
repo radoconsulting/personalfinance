@@ -966,6 +966,7 @@ class PensionAccountSetting(TypedDict, total=False):
 
 @_tool(LOCAL_EDIT)
 def set_pension_profile(birth_date: Optional[str] = None, retirement_age: Optional[int] = None,
+                        stop_work_age: Optional[int] = None,
                         legal_pension_monthly: Optional[float] = None,
                         partner_legal_pension_monthly: Optional[float] = None,
                         return_pension: Optional[float] = None, return_investments: Optional[float] = None,
@@ -974,9 +975,11 @@ def set_pension_profile(birth_date: Optional[str] = None, retirement_age: Option
                         accounts: Optional[list[PensionAccountSetting]] = None,
                         spending_monthly: Optional[float] = None, investing_yearly: Optional[float] = None,
                         investing_years: Optional[int] = None, one_off_threshold: Optional[float] = None,
-                        reset: Optional[list[Literal["spending_monthly", "investing_yearly", "investing_years",
+                        reset: Optional[list[Literal["spending_monthly", "investing_yearly", "investing_years", "stop_work_age",
                                                      "one_off_threshold", "legal_pension_monthly"]]] = None) -> str:
     """Save what the pension overview and the planner need: birth_date (YYYY-MM-DD), retirement_age (default 67),
+    stop_work_age (stop working and saving earlier: premiums and new investing stop then, and you live from your
+    capital until the pension; reset it with reset=["stop_work_age"]),
     legal_pension_monthly (gross per month in today's euros, from mypension.be), assumptions as fractions (0.025 =
     2,5 %): return_pension (pillars 2/3), return_investments (pillar 4), inflation, payout_tax (2nd pillar),
     withdrawal_rate; per pension account: pillar (2/3/4), expected_at_retirement (from the pension fiche) or
@@ -988,7 +991,8 @@ def set_pension_profile(birth_date: Optional[str] = None, retirement_age: Option
     from . import pension
     acc = {a["account"]: {k: v for k, v in a.items() if k != "account"} for a in (accounts or [])}
     return _edit_call(lambda c: pension.set_profile(
-        c, birth_date=birth_date, retirement_age=retirement_age, legal_pension_monthly=legal_pension_monthly,
+        c, birth_date=birth_date, retirement_age=retirement_age, stop_work_age=stop_work_age,
+        legal_pension_monthly=legal_pension_monthly,
         partner_legal_pension_monthly=partner_legal_pension_monthly, return_pension=return_pension,
         return_investments=return_investments, inflation=inflation, payout_tax=payout_tax,
         withdrawal_rate=withdrawal_rate, live_until=live_until, accounts=acc, spending_monthly=spending_monthly,

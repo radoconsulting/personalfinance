@@ -232,8 +232,9 @@ def cmd_pension(a):
     with closing(db.connect()) as conn:
         if a.one_off or a.keep:
             pension.mark_one_off(conn, a.one_off or a.keep, True if a.one_off else False)
-        if any(x is not None for x in (a.birth_date, a.legal, a.age, a.spending, a.investing)) or a.auto:
+        if any(x is not None for x in (a.birth_date, a.legal, a.age, a.spending, a.investing, a.stop_at)) or a.auto:
             pension.set_profile(conn, birth_date=a.birth_date, legal_pension_monthly=a.legal, retirement_age=a.age,
+                                stop_work_age=a.stop_at,
                                 spending_monthly=a.spending, investing_yearly=a.investing, reset=a.auto or None)
         o = pension.overview(conn)
     if a.json:
@@ -874,7 +875,9 @@ def build_parser():
     s.add_argument("--age", type=int, help="retirement age (default 67)")
     s.add_argument("--spending", type=float, help="spending per month for the projection (instead of history)")
     s.add_argument("--investing", type=float, help="new money into investments per year (instead of history)")
-    s.add_argument("--auto", nargs="+", choices=["spending_monthly", "investing_yearly", "one_off_threshold"],
+    s.add_argument("--stop-at", dest="stop_at", type=int, help="stop working (and saving) at this age")
+    s.add_argument("--auto", nargs="+", choices=["spending_monthly", "investing_yearly", "one_off_threshold",
+                                                 "stop_work_age"],
                    help="back to the figure from history")
     s.add_argument("--one-off", dest="one_off", nargs="+", metavar="ID", help="leave these payments out of spending")
     s.add_argument("--keep", nargs="+", metavar="ID", help="count these payments after all")
