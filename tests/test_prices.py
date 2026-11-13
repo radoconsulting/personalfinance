@@ -13,7 +13,7 @@ TODAY = date(2026, 11, 6)
 
 
 def _chart(symbol, price, ccy, prev):
-    now = int(datetime(2026, 11, 6, 17, 30).timestamp())
+    now = int(datetime.now().timestamp()) - 3600  # a fresh quote (the code drops listings older than 7 days)
     day = 86400
     return {"chart": {"result": [{"meta": {"regularMarketPrice": price, "currency": ccy, "symbol": symbol,
                                            "regularMarketTime": now},

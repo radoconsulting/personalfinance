@@ -148,8 +148,14 @@ def _extras(conn, today: date) -> dict:
     home = _safe(loans.overview, conn, today)
     return {**_r17(conn, today), "networth_history": _safe(networth.timeline, conn), "tax": _safe(tax_view),
             "home": home if isinstance(home, dict) and (home.get("loans") or home.get("property")) else None,
-            "analysis": _safe(analysis.report, conn, today), "review": _safe(review_view),
+            "analysis": _safe(analysis.report, conn, today), "risk": _safe(_risk, conn, today),
+            "review": _safe(review_view),
             "categories": [c[0] for c in CATEGORIES if c[1] != "transfer" or c[0] == "Household transfers"]}
+
+
+def _risk(conn, today):
+    from . import risk
+    return risk.report(conn, today)
 
 
 def _r17(conn, today: date) -> dict:

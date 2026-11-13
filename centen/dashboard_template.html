@@ -331,7 +331,7 @@ function niceTicks(lo, hi, n = 5) {
   return out;
 }
 
-function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLabel, refs = []}) {
+function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLabel, refs = [], fmtY = null, zero = true}) {
   host.textContent = "";
   if (!labels.length) { host.append(el("div", {class: "empty"}, "Geen gegevens in deze periode.")); return; }
   if (series.length >= 2) host.append(el("div", {class: "legend"},
@@ -340,7 +340,7 @@ function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLa
   const directLabels = series.length <= 4;
   const m = {l: W < 480 ? 44 : 52, r: directLabels ? (W < 480 ? 62 : 92) : 16, t: 10, b: 26};
   const vals = series.flatMap(s => s.values).filter(v => v != null).concat(refs.map(r => r.value));
-  const ticks = niceTicks(Math.min(0, ...vals), Math.max(0, ...vals), 5);
+  const ticks = zero ? niceTicks(Math.min(0, ...vals), Math.max(0, ...vals), 5) : niceTicks(Math.min(...vals), Math.max(...vals), 5);
   const lo = ticks[0], hi = ticks[ticks.length - 1];
   const n = labels.length, iw = W - m.l - m.r, ih = H - m.t - m.b;
   const x = i => m.l + (n <= 1 ? iw / 2 : i * iw / (n - 1));
@@ -348,7 +348,7 @@ function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLa
   const svg = sv("svg", {width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": series.map(s => s.name).join(", ")});
   for (const t of ticks) {
     svg.append(sv("line", {x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: t === 0 ? "var(--axis)" : "var(--grid)", "stroke-width": 1}));
-    svg.append(sv("text", {x: m.l - 8, y: y(t) + 4, "text-anchor": "end"}, axisEur(t)));
+    svg.append(sv("text", {x: m.l - 8, y: y(t) + 4, "text-anchor": "end"}, (fmtY || axisEur)(t)));
   }
   const every = Math.max(1, Math.ceil(n / Math.max(2, Math.floor(iw / 64))));
   // x labels: every k-th, plus the last one for short series; a label too close to its neighbour is dropped (r22)
@@ -380,7 +380,7 @@ function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLa
   if (directLabels && ends.length) {
     ends.sort((a, b) => a.y - b.y);
     const clash = ends.some((e, i) => i && e.y - ends[i - 1].y < 15);
-    if (!clash) for (const e of ends) svg.append(sv("text", {class: "end", x: W - m.r + 10, y: e.y + 4}, axisEur(e.v)));
+    if (!clash) for (const e of ends) svg.append(sv("text", {class: "end", x: W - m.r + 10, y: e.y + 4}, (fmtY || axisEur)(e.v)));
   }
   const cross = sv("line", {y1: m.t, y2: m.t + ih, stroke: "var(--axis)", "stroke-width": 1, visibility: "hidden"});
   svg.append(cross);
@@ -394,7 +394,7 @@ function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLa
       marks[k].setAttribute("cx", x(cur)); marks[k].setAttribute("cy", y(v)); marks[k].setAttribute("visibility", "visible"); });
     const r = svg.getBoundingClientRect();
     const e = evt || {clientX: r.left + x(cur), clientY: r.top + m.t + 10};
-    showTip(e, fmtX(labels[cur], true), series.map(s => ({name: s.name, value: eur(s.values[cur]), color: s.color})));
+    showTip(e, fmtX(labels[cur], true), series.map(s => ({name: s.name, value: (fmtY || eur)(s.values[cur]), color: s.color})));
   };
   hit.addEventListener("pointermove", e => { const r = svg.getBoundingClientRect(); const px = e.clientX - r.left;
     show(Math.round((px - m.l) / (iw / Math.max(1, n - 1))), e); });
@@ -406,7 +406,7 @@ function lineChart(host, {labels, series, height = 250, area = false, fmtX = mLa
   host.append(svg);
 }
 
-function hbars(host, items, {color = "var(--s1)", signed = false, max = 12, label = x => x.label, value = x => x.value, extra} = {}) {
+function hbars(host, items, {color = "var(--s1)", signed = false, max = 12, label = x => x.label, value = x => x.value, extra, fmt = null} = {}) {
   host.textContent = "";
   let list = items.filter(i => Math.abs(value(i)) >= 0.5);
   if (!list.length) { host.append(el("div", {class: "empty"}, "Niets in deze periode.")); return; }
@@ -427,8 +427,8 @@ function hbars(host, items, {color = "var(--s1)", signed = false, max = 12, labe
       (v < 0 ? `right:${100 - zeroAt}%` : `left:${zeroAt}%`)});
     track.append(b);
     if (hasNeg) track.append(el("div", {class: "zero", style: `left:${zeroAt}%`}));
-    const row = [el("div", {class: "bl", title: name}, name), track, el("div", {class: "bv"}, signed ? eurS(v) : eur(v))];
-    const enter = e => showTip(e, name, [{name: "Bedrag", value: eur(v)}].concat(extra && !it.__other ? extra(it) : []));
+    const row = [el("div", {class: "bl", title: name}, name), track, el("div", {class: "bv"}, fmt ? fmt(v, it) : signed ? eurS(v) : eur(v))];
+    const enter = e => showTip(e, name, (fmt ? [] : [{name: "Bedrag", value: eur(v)}]).concat(extra && !it.__other ? extra(it) : []));
     row.forEach(r => { r.addEventListener("pointermove", enter); r.addEventListener("pointerleave", hideTip); box.append(r); });
   });
   host.append(box);
@@ -1006,7 +1006,7 @@ function viewInvest(v) {
   const noPos = !P_.length && !ana.length;
   const hint = noPos ? card("Posities, spreiding en dividenden", "Verschijnen zodra je posities hebt") : null;
   if (hint) hint.body.append(el("div", {class: "muted"}, "Importeer je brokerexports (DEGIRO, LYNX, Bitvavo) in de bijwerk-app onder Bestanden, of geef Claude een screenshot van je posities. Dan zie je hier je posities met aankoopkoers en rendement, de spreiding tegenover je doelen, een dividendkalender en de vergelijking met een wereldwijde ETF."));
-  const g = el("div", {class: "grid g2", style: "margin-top:14px"}, t.root, mix.root, b.root, c.root, noPos ? hint.root : pos.root, ...ana, yrs && yrs.root, chk && chk.root);
+  const g = el("div", {class: "grid g2", style: "margin-top:14px"}, t.root, mix.root, b.root, c.root, noPos ? hint.root : pos.root, ...ana, ...riskCards(), yrs && yrs.root, chk && chk.root);
   const how = card("Bijhouden", "Waarden veranderen niet vanzelf: geef ze af en toe opnieuw in", {cls: "span4"});
   how.body.append(el("div", {class: "soon"}, [
     ["Waarde bijwerken", "Zeg tegen Claude bv. “DEGIRO staat op € 152.340”, of: centen asset value DEGIRO 152.340"],
@@ -1246,6 +1246,94 @@ function viewTax(v) {
 }
 
 const DIM_NL = {class: "Soort", region: "Regio", currency: "Noteringsmunt", account: "Rekening"};
+function riskCards() {
+  const R = X("risk");
+  if (!R) return [];
+  const out = [], TW = R.time_weighted || {}, T = TW.total || {}, B = TW.benchmark || {};
+  const pc = x => x == null ? "—" : pctS(x);
+  // 1. time-weighted return
+  const rc = card("Rendement en risico", T.months && T.months.length ? `Tijdgewogen (TWR) · ${T.months.length} maanden sinds ${mLabel(T.months[0])}` : "Tijdgewogen rendement", {cls: "span2",
+    table: () => table([{label: "Rekening", get: r => r.account}, {label: "Sinds", get: r => mLabel(r.from)}, {label: "Totaal", num: true, get: r => pc(r.total)},
+      {label: "Per jaar", num: true, get: r => pc(r.annualised)}, {label: "Volatiliteit", num: true, get: r => r.volatility == null ? "—" : pct(r.volatility)},
+      {label: "Max. daling", num: true, get: r => pc(r.max_drawdown)}, {label: "Slechtste maand", num: true, get: r => pc(r.worst_month)}], TW.accounts || [])});
+  if (TW.error || !(T.months && T.months.length)) {
+    rc.body.append(el("div", {class: "muted"}, TW.error || TW.note || "Nog geen gegevens."));
+  } else {
+    const yr = T.annualised != null;
+    rc.body.append(el("div", {class: "grid g4", style: "margin-bottom:12px"},
+      tile(yr ? "Per jaar" : "Totaal", pc(yr ? T.annualised : T.total), B.months && B.months.length ? `${B.name.split(" (")[0]}: ${pc(yr ? B.annualised : B.total)}` : "zonder benchmark"),
+      tile("Volatiliteit", T.volatility == null ? "—" : pct(T.volatility), B.volatility != null ? `benchmark ${pct(B.volatility)} · per jaar` : "per jaar"),
+      tile("Grootste daling", pc(T.max_drawdown), B.max_drawdown != null ? `benchmark ${pc(B.max_drawdown)}` : "van top tot dal"),
+      tile("Slechtste maand", pc(T.worst_month), `beste ${pc(T.best_month)} · ${pct(T.positive_months || 0)} maanden positief`)));
+    const host = el("div");
+    rc.body.append(host);
+    const L = TW.line || [];
+    requestAnimationFrame(() => lineChart(host, {labels: L.map(x => x.month), series: [
+      {name: "Jouw beleggingen", values: L.map(x => x.own), color: SERIES[0]},
+      ...(L.some(x => x.benchmark != null) && B.months.length ? [{name: B.name.split(" (")[0], values: L.map(x => x.benchmark), color: "var(--s7)"}] : [])],
+      fmtY: v => v == null ? "—" : num1.format(v), zero: false}));
+    const facts = [`Start = 100. Stortingen en opnames tellen niet als rendement.`];
+    if (TW.correlation_with_benchmark != null) facts.push(`correlatie met de benchmark ${TW.correlation_with_benchmark.toFixed(2).replace(".", ",")}` + (TW.beta != null ? ` · bèta ${TW.beta.toFixed(2).replace(".", ",")}` : ""));
+    if ((TW.left_out || []).length) facts.push(`niet meegeteld (geen koerswaarden): ${TW.left_out.join(", ")}`);
+    if ((T.skipped || []).length) facts.push(`${T.skipped.length} maand${T.skipped.length > 1 ? "en" : ""} overgeslagen (sprong in de gegevens)`);
+    rc.body.append(el("div", {class: "note", style: "margin-top:6px"}, facts.join(" · ")));
+  }
+  out.push(rc.root);
+  // 2. diversification score
+  const DV = R.diversification;
+  if (DV) {
+    const dc = card("Spreidingsscore", `${DV.label} · na doorkijk in je indexfondsen`);
+    const col = DV.score >= 80 ? "var(--pos)" : DV.score >= 60 ? "var(--warning)" : "var(--neg)";
+    dc.body.append(el("div", {style: "display:flex;align-items:baseline;gap:8px;margin-bottom:8px"},
+      el("div", {style: `font-size:40px;font-weight:600;color:${col}`}, String(DV.score)), el("div", {class: "muted"}, "/ 100")));
+    if (DV.penalties.length) dc.body.append(el("ul", {class: "checklist"}, DV.penalties.map(p => el("li", {}, p.points ? `−${p.points}: ${p.text}` : p.text))));
+    else dc.body.append(el("div", {class: "muted"}, "Niets dat de score drukt."));
+    dc.body.append(el("div", {class: "note", style: "margin-top:6px"}, [`effectief ${num1.format(DV.effective_sectors)} sectoren`,
+      DV.top_region ? `grootste regio ${DV.top_region.name} ${pct(DV.top_region.weight)}` : null, `${pct(DV.funds_share)} in fondsen`,
+      `crypto ${pct(DV.crypto_share)}`].filter(Boolean).join(" · ") + ". Een vuistregel, geen advies."));
+    out.push(dc.root);
+  }
+  // 3. look-through
+  const LT = R.look_through;
+  if (LT) {
+    const st = {dim: "regions"};
+    const lc = card("Doorkijk: wat zit er echt in", "Indexfondsen opgesplitst in regio's en sectoren (benaderende indexgewichten)", {table: () => table([
+      {label: st.dim === "regions" ? "Regio" : "Sector", get: r => r.bucket}, {label: "Waarde", num: true, get: r => eur(r.value)}, {label: "Aandeel", num: true, get: r => pct(r.weight)}], LT[st.dim])});
+    const seg = el("div", {class: "seg", role: "group", "aria-label": "Doorkijk volgens", style: "margin-bottom:10px"}), host = el("div");
+    const draw = () => {
+      seg.textContent = "";
+      for (const [d, l] of [["regions", "Regio's"], ["sectors", "Sectoren"]]) seg.append(el("button", {type: "button", "aria-pressed": String(d === st.dim), onclick: () => { st.dim = d; draw(); }}, l));
+      hbars(host, LT[st.dim].map(r => ({label: r.bucket, value: r.value, w: r.weight})), {color: st.dim === "regions" ? "var(--s1)" : "var(--s3)",
+        fmt: (v, it) => `${pct(it.w != null ? it.w : v / LT[st.dim].reduce((a, r) => a + r.value, 0))} · ${eur(v)}`});
+    };
+    lc.body.append(seg, host);
+    requestAnimationFrame(draw);
+    const notes = LT.overlaps.map(o => o.text);
+    if (LT.unknown_sector_share > 0.02) notes.push(`${pct(LT.unknown_sector_share)} zonder gekende sector (aandelen of fondsen die de doorkijk niet kent): zeg tegen Claude bv. “NVIDIA is IT”.`);
+    if (notes.length) lc.body.append(el("div", {class: "note", style: "margin-top:8px"}, notes.join(" ")));
+    out.push(lc.root);
+  }
+  // 4. risk of the current mix
+  const HR = R.holdings_risk;
+  if (HR && HR.available) {
+    const hc = card("Risico van je huidige mix", `Je verdeling van vandaag over ${HR.months} maanden koersen (${mLabel(HR.from)} – ${mLabel(HR.to)})`, {cls: "span2", table: () => table([
+      {label: "Positie", get: r => r.name}, {label: "Gewicht", num: true, get: r => pct(r.weight)}, {label: "Volatiliteit", num: true, get: r => r.volatility == null ? "—" : pct(r.volatility)},
+      {label: "Deel van het risico", num: true, get: r => r.risk_share == null ? "—" : pct(r.risk_share)}, {label: "Slechtste maand", num: true, get: r => pc(r.worst_month)}], HR.holdings)});
+    hc.body.append(el("div", {class: "grid g3", style: "margin-bottom:10px"},
+      tile("Volatiliteit", HR.volatility == null ? "—" : pct(HR.volatility), "per jaar"), tile("Grootste daling", pc(HR.max_drawdown), "van top tot dal"),
+      tile("Slechtste maand", pc(HR.worst_month), `beste ${pc(HR.best_month)}`)));
+    const top = HR.holdings.filter(h => h.risk_share != null).slice(0, 8), host = el("div");
+    hc.body.append(el("div", {class: "muted small", style: "margin-bottom:4px"}, "Deel van het totale risico per positie, tegenover het gewicht"), host);
+    requestAnimationFrame(() => hbars(host, top.map(h => ({label: h.name, value: h.risk_share * 100, w: h.weight})), {color: "var(--s5)",
+      fmt: (v, it) => it.__other ? `${num1.format(v)} %` : `${num1.format(v)} % · gewicht ${pct(it.w)}`}));
+    const hi = (HR.correlations || []).filter(c => c.correlation >= 0.85).slice(0, 3);
+    hc.body.append(el("div", {class: "note", style: "margin-top:6px"}, (hi.length ? `Bewegen bijna samen: ${hi.map(c => `${c.a} en ${c.b} (${c.correlation.toFixed(2).replace(".", ",")})`).join("; ")}. ` : "") +
+      (HR.coverage < 0.98 ? `${pct(HR.coverage)} van je posities heeft koershistoriek. ` : "") + HR.note));
+    out.push(hc.root);
+  }
+  return out;
+}
+
 function analysisCards() {
   const A_ = X("analysis");
   if (!A_) return [];

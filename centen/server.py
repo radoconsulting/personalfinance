@@ -800,6 +800,36 @@ def set_instrument_region(instrument: str, region: str) -> str:
     return _edit_call(lambda c: analysis.set_instrument(c, instrument, region=region))
 
 
+@_tool(READ)
+def portfolio_risk() -> str:
+    """Return and risk of the investments (investment and crypto accounts, not the pension): the time-weighted return
+    (TWR: the investments' own result, independent of when you deposited; comparable with a fund) per account and in
+    total, annualised, volatility, maximum drawdown, best/worst month, against the benchmark (correlation, beta);
+    the risk of the current mix replayed over the last 36 months of prices, with each holding's share of the risk and
+    the correlations between the largest holdings; a look-through of index funds into regions and sectors
+    (approximate index weights), funds that overlap, and a diversification score 0–100 with what pulls it down.
+    A planning aid, not advice. Use portfolio_analysis for allocation targets, dividends and the money-weighted XIRR."""
+    from . import risk
+    with _conn() as c:
+        res = risk.report(c, _today())
+    tw = res.get("time_weighted") or {}
+    for k in ("total", "benchmark"):
+        if isinstance(tw.get(k), dict):
+            tw[k].pop("returns", None)
+            tw[k]["months"] = len(tw[k].get("months") or [])
+    tw["line"] = (tw.get("line") or [])[-24:]
+    return _out(res)
+
+
+@_tool(LOCAL_EDIT)
+def set_instrument_sector(instrument: str, sector: Optional[str] = None) -> str:
+    """The sector of a stock (ISIN) for the look-through in portfolio_risk: IT, Financiën, Industrie,
+    Gezondheidszorg, Cons. discretionair, Communicatie, Basisconsumptie, Energie, Materialen, Nutsbedrijven, Vastgoed
+    (or Obligaties, Grondstoffen, Gemengd for a fund the look-through doesn't know). Empty removes it."""
+    from . import risk
+    return _edit_call(lambda c: risk.set_sector(c, instrument, sector))
+
+
 @_tool(LOCAL_EDIT)
 def weekly_digest() -> str:
     """This week's digest: spending and income of the last 7 days, the largest payments, unusual activity, bills in
