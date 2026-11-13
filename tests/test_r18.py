@@ -215,3 +215,23 @@ def test_dashboard_has_r18_sections(demo_conn, tmp_path):
     data = dashboard._extras(demo_conn, TODAY)
     assert data["vehicles"][0]["name"] == "Spyder"
     assert "error" not in (data["prepay"] or {})
+
+
+def test_money_back_in_a_spending_category_is_a_one_off_too(demo_conn):
+    from centen import pension, planner
+    acc = demo_conn.execute("SELECT id FROM accounts WHERE account_type='current'").fetchone()[0]
+    base = pension.spending_profile(demo_conn, TODAY)
+    db.insert_transactions(demo_conn, [
+        dict(id="buy", account_id=acc, booking_date="2026-07-16", amount=-139000.0, status="booked",
+             counterparty_name="Porsche", merchant="Porsche", merchant_key="porsche", category="Car & maintenance",
+             kind="expense", source="t"),
+        dict(id="sell", account_id=acc, booking_date="2026-07-07", amount=100000.0, status="booked",
+             counterparty_name="Garage", merchant="Garage", merchant_key="garage", category="Car & maintenance",
+             kind="expense", source="t")])
+    sp = pension.spending_profile(demo_conn, TODAY)
+    assert {o["id"]: o["amount"] for o in sp["one_offs"]} == {"buy": 139000.0, "sell": -100000.0}
+    assert sp["monthly"] == pytest.approx(base["monthly"], abs=0.05)  # neither the purchase nor the sale counts
+    pension.set_profile(demo_conn, birth_date="1988-01-28")
+    assert planner.inputs(demo_conn, TODAY)["one_offs_added_back_monthly"] == pytest.approx(39000 / 12, abs=1)
+    big = {x["id"]: x for x in app.state(demo_conn, TODAY)["pension"]["big_expenses"]}
+    assert big["sell"]["amount"] == -100000.0 and big["sell"]["state"] == "auto"

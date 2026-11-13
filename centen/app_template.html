@@ -239,7 +239,7 @@ function vPension(v) {
   c.append(el("table", {}, el("tbody", {}, fields.map((f, i) => el("tr", {}, labCell(lab[i]), el("td", {}, f))))), el("div", {class: "row", style: "margin-top:8px"}, save));
   v.append(c);
 
-  const b = el("div", {class: "card"}, el("h2", {}, "Grote uitgaven van de laatste 12 maanden"), el("div", {class: "sub"},
+  const b = el("div", {class: "card"}, el("h2", {}, "Grote uitgaven (en terugbetalingen) van de laatste 12 maanden"), el("div", {class: "sub"},
     `Eenmalige uitgaven tellen niet mee in je uitgavenprofiel. Vanaf ${eur(pr.one_off_threshold)} gebeurt dat automatisch; hier zet je het per betaling zelf.`));
   const LBL = {auto: "eenmalig (automatisch)", manual: "eenmalig (door jou)", kept: "telt mee (door jou)", counted: "telt mee"};
   b.append(P.big_expenses.length ? el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Datum"), el("th", {}, "Wat"), el("th", {class: "num"}, "Bedrag"), el("th", {}, "Nu"), el("th", {}, ""))),
@@ -248,7 +248,7 @@ function vPension(v) {
       const btn = el("button", {class: "ghost"}, one ? "Toch meetellen" : "Niet meetellen");
       btn.addEventListener("click", () => post("one_off", {id: x.id, state: one ? (x.state === "auto" ? "in" : "auto") : "out"}, btn));
       const reset = x.state === "manual" || x.state === "kept" ? el("button", {class: "ghost", onclick: e => post("one_off", {id: x.id, state: "auto"}, e.target)}, "automatisch") : null;
-      return el("tr", {}, el("td", {}, dL(x.date)), el("td", {}, x.merchant || "—", el("div", {class: "muted small"}, cat(x.category))), el("td", {class: "num"}, eur(x.amount)),
+      return el("tr", {}, el("td", {}, dL(x.date)), el("td", {}, x.merchant || "—", el("div", {class: "muted small"}, cat(x.category))), el("td", {class: "num"}, x.amount < 0 ? "+" + eur(-x.amount) + " terug" : eur(x.amount)),
         el("td", {}, el("span", {class: "chip" + (one ? " warn" : "")}, LBL[x.state])), el("td", {}, el("div", {class: "row"}, btn, reset)));
     }))) : el("div", {class: "muted"}, "Geen uitgaven boven € 1.000."));
   v.append(b);

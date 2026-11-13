@@ -172,7 +172,8 @@ def _comes_back(conn, r) -> bool:
 
 def one_offs(conn, start: date, end: date, p: dict | None = None) -> list[dict]:
     """Personal expenses between start and end that don't belong in the spending profile: single payments of at
-    least the threshold that don't come back yearly, plus what the user marked; minus what the user kept."""
+    least the threshold that don't come back yearly, and large amounts coming back in a spending category (selling
+    the old car), plus what the user marked; minus what the user kept. amount > 0 = money out, < 0 = money in."""
     p = p or profile(conn)
     excl, incl = set(p.get("one_off_exclude") or []), set(p.get("one_off_include") or [])
     thr = float(p.get("one_off_threshold") or DEFAULTS["one_off_threshold"])
@@ -185,6 +186,8 @@ def one_offs(conn, start: date, end: date, p: dict | None = None) -> list[dict]:
             reason = "manual"
         elif -r["amount"] >= thr and r["category"] not in KEEP_CATEGORIES and not _comes_back(conn, r):
             reason = "auto"
+        elif r["amount"] >= thr and r["category"] not in KEEP_CATEGORIES:
+            reason = "auto"  # money back in a spending category (the sale of a car): one-off too
         if reason:
             out.append({"id": r["id"], "date": r["booking_date"], "merchant": r["merchant"], "category": r["category"],
                         "amount": r2(-r["amount"]), "reason": reason})

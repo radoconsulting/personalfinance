@@ -1367,7 +1367,7 @@ function viewPension(v) {
   const g3 = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
   const co = card("Niet meegeteld als uitgave", `Eenmalig: vanaf ${eur(SP.threshold)} per betaling automatisch (tenzij hetzelfde bedrag een jaar eerder ook betaald werd), of door jou aangeduid. Aanpassen: vraag het Claude of centen pension --one-off ID / --keep ID.`);
   co.body.append(SP.one_offs.length ? table([{label: "Datum", get: r => dLabel(r.date)}, {label: "Wat", get: r => r.merchant || "—"},
-    {label: "Soort", get: r => cat(r.category)}, {label: "Bedrag", num: true, get: r => eur(r.amount)},
+    {label: "Soort", get: r => cat(r.category)}, {label: "Bedrag", num: true, get: r => r.amount < 0 ? "+" + eur(-r.amount) + " terug" : eur(r.amount)},
     {label: "", get: r => r.reason === "manual" ? "door jou" : "automatisch"}], SP.one_offs) : el("div", {class: "empty"}, "Geen eenmalige uitgaven in de laatste 12 maanden."));
   co.body.append(el("div", {class: "note", style: "margin-top:6px"}, SP.override ? `Je gebruikt zelf ${eur(SP.monthly)} per maand; uit de historiek zou het ${eur(SP.monthly_from_history)} zijn.` :
     `Met alles meegeteld was het ${eur(SP.monthly_raw)} per maand.`));

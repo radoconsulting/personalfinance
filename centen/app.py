@@ -117,9 +117,9 @@ def _pension_state(conn, today: date) -> dict:
     big = []
     for r in conn.execute(
             "SELECT t.id, t.booking_date, t.merchant, t.category, t.amount FROM transactions t JOIN accounts a "
-            "ON a.id=t.account_id WHERE COALESCE(a.scope,'personal')='personal' AND t.kind='expense' AND t.amount<=-1000 "
+            "ON a.id=t.account_id WHERE COALESCE(a.scope,'personal')='personal' AND t.kind='expense' AND ABS(t.amount)>=1000 "
             "AND COALESCE(t.category,'') != 'Loans & mortgage' "
-            "AND t.booking_date>=? AND t.status='booked' ORDER BY t.amount LIMIT 40",
+            "AND t.booking_date>=? AND t.status='booked' ORDER BY ABS(t.amount) DESC LIMIT 40",
             ((today - timedelta(days=365)).isoformat(),)):
         state_ = "manual" if r["id"] in excl else "kept" if r["id"] in incl else "auto" if r["id"] in auto else "counted"
         big.append({"id": r["id"], "date": r["booking_date"], "merchant": r["merchant"], "category": r["category"],
