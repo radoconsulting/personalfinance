@@ -29,7 +29,8 @@ SENT_KEY = "notified_alerts"
 _KIND_NL = {"possible_duplicate": "Mogelijk dubbele betaling", "higher_than_usual": "Hoger bedrag dan gewoonlijk",
             "large_new_merchant": "Grote betaling aan een nieuwe begunstigde", "price_increase": "Prijsstijging",
             "low_balance": "Saldo zakt onder je buffer", "below_zero": "Rekening dreigt onder nul te gaan",
-            "consent": "Bankkoppeling verloopt binnenkort", "fee": "Bankkosten of debetrente"}
+            "consent": "Bankkoppeling verloopt binnenkort", "fee": "Bankkosten of debetrente",
+            "pension_fiche": "Nieuwe pensioenfiche op mypension.be"}
 
 
 def settings() -> dict:
@@ -122,6 +123,19 @@ def collect(conn, today: date | None = None) -> list[dict]:
             if 0 <= left <= 7:
                 out.append({"id": f"consent|{r['aspsp_name']}|{r['valid_until'][:10]}", "kind": "consent",
                             "text": f"{r['aspsp_name']}: toestemming verloopt over {left} dagen.", "amount": None})
+    # once a year, when mypension.be has the new figures (September), a reminder to load the pension fiche when the
+    # values you entered are older than half a year (mypension.be has no API; logging in needs itsme or the eID)
+    if today.month >= 9 and not (today.month == 9 and today.day < 15):
+        old = []
+        for r in conn.execute("SELECT a.name, (SELECT MAX(b.as_of) FROM balances b WHERE b.account_id=a.id "
+                              "AND b.balance_type='valuation') AS last FROM accounts a "
+                              "WHERE a.source='asset' AND a.account_type='pension'"):
+            if not r["last"] or (today - date.fromisoformat(r["last"][:10])).days > 180:
+                old.append(r["name"])
+        if old:
+            out.append({"id": f"pension_fiche|{today.year}", "kind": "pension_fiche", "amount": None,
+                        "text": f"Nieuwe pensioengegevens op mypension.be: laad de fiche op in de bijwerk-app "
+                                f"(Pensioen) voor {', '.join(old)}."})
     return out
 
 

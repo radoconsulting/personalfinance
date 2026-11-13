@@ -550,7 +550,7 @@ def read_statement(path: str) -> str:
     except ImportError as e:  # pragma: no cover
         raise ValueError("pdfplumber is needed to read PDFs (pip install pdfplumber)") from e
     with pdfplumber.open(path) as pdf:
-        return "\n".join(p.extract_text() or "" for p in pdf.pages[:12])
+        return "\n".join(p.extract_text() or "" for p in pdf.pages[:25])
 
 
 def import_statement(conn, path: str | None = None, account: str | None = None, apply: bool = False,

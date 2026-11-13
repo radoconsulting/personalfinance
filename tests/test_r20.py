@@ -93,3 +93,22 @@ def test_nn_certificate():
     assert f["expected"]["amount"] == 959662.61
     assert f["premium"]["amount"] == 4890.0
     assert f["age"] == 67
+
+
+def test_mypension_certificate_and_reminder(conn):
+    from centen import notify, pension
+    txt = NN_CERT.replace("10.09.2024", "04.04.2026").replace("72.203,00", "93.438,85").replace(
+        "215.607,14 959.662,61 1.345.344,86", "227.591,11 983.420,30 1.363.581,94")
+    f = pension.parse_statement_text("pagina 1 van 13\nReden van uitgifte: Sigedis\n" + txt)
+    assert f["reserve"]["amount"] == 93438.85 and f["reserve"]["date"] == "2026-04-04"
+    assert f["expected"]["amount"] == 983420.3 and f["premium"]["amount"] == 4890.0
+    # yearly reminder from mid-September when the pension value is older than half a year
+    kinds = lambda d: [i for i in notify.collect(conn, d) if i["kind"] == "pension_fiche"]  # noqa: E731
+    assert not kinds(date(2026, 9, 1))
+    r = conn.execute("SELECT a.id FROM accounts a WHERE a.account_type='pension'").fetchone()
+    conn.execute("DELETE FROM balances WHERE account_id=? AND balance_type='valuation'", (r[0],))
+    conn.execute("INSERT INTO balances(account_id, as_of, balance_type, amount) VALUES (?,?,?,?)",
+                 (r[0], "2026-01-01", "valuation", 40000))
+    assert kinds(date(2026, 9, 20))
+    conn.execute("UPDATE balances SET as_of='2026-09-10' WHERE account_id=? AND balance_type='valuation'", (r[0],))
+    assert not kinds(date(2026, 9, 20))
