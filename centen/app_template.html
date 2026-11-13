@@ -306,8 +306,9 @@ function pensionFicheCard() {
       out.textContent = "";
       const res = inp("reserve", "reserve", fd.reserve ? fd.reserve.amount : ""), dd = inp("date", "datum", (fd.reserve && fd.reserve.date) || fd.statement_date || S.today, "date");
       const ex = inp("expected", "verwacht kapitaal", fd.expected ? fd.expected.amount : ""), pm = inp("premium", "premie / jaar", fd.premium ? fd.premium.amount : "");
+      const rt = inp("return", "rendement %", fd.expected && fd.expected.return != null ? Math.round(fd.expected.return * 10000) / 100 : "");
       const ok = el("button", {class: "go"}, "Opslaan");
-      ok.addEventListener("click", () => post("pension_values", {account: accSel.value, reserve: res.value, date: dd.value, expected: ex.value, premium: pm.value}, ok, "Fiche verwerkt"));
+      ok.addEventListener("click", () => post("pension_values", {account: accSel.value, reserve: res.value, date: dd.value, expected: ex.value, premium: pm.value, return: rt.value}, ok, "Fiche verwerkt"));
       const older = R.newer_value;
       if (older) out.append(el("div", {class: "small", style: "color:var(--warn,#b26b00);margin-bottom:6px"},
         `Let op: je gaf op ${dL(older.date)} al een recentere waarde in (${eur(older.amount)}). De reserve van deze fiche wordt als oudere waarde bewaard; je huidige waarde blijft staan.`));
@@ -315,6 +316,7 @@ function pensionFicheCard() {
       out.append(el("table", {}, el("tbody", {},
         el("tr", {}, el("td", {}, "Reserve (waarde nu)"), el("td", {}, el("div", {class: "row"}, res, dd), src("reserve"))),
         el("tr", {}, el("td", {}, `Verwacht kapitaal${fd.age ? " op " + fd.age + " jaar" : ""}`), el("td", {}, ex, src("expected"))),
+        el("tr", {}, el("td", {}, "Rendement van die projectie (% per jaar)"), el("td", {}, rt, el("div", {class: "muted small"}, fd.expected && fd.expected.return != null ? "gemiddelde van de fondsen in de tweede (realistische) projectie; gebruikt om verder te rekenen, bv. als je vroeger stopt" : "niet gevonden: leeg = het rendement uit je pensioenprofiel"))),
         el("tr", {}, el("td", {}, "Premie per jaar"), el("td", {}, pm, src("premium"))))), el("div", {class: "row", style: "margin-top:8px"}, ok));
     } catch (e) { out.textContent = e.message; out.style.color = "var(--bad)"; }
     file.value = "";

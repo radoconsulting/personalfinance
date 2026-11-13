@@ -182,7 +182,8 @@ def act(conn, action: str, p: dict) -> dict:
         return pension.apply_values(conn, p["account"], amount(p["reserve"]) if str(p.get("reserve") or "").strip() else None,
                                     day(p.get("date")) if p.get("date") else None,
                                     amount(p["expected"]) if str(p.get("expected") or "").strip() else None,
-                                    amount(p["premium"]) if str(p.get("premium") or "").strip() else None)
+                                    amount(p["premium"]) if str(p.get("premium") or "").strip() else None,
+                                    return_=amount(p["return"]) / 100 if str(p.get("return") or "").strip() else None)
     if action == "tax_profile":
         from . import remuneration
         return remuneration.set_profile(conn, amount(p["municipal_rate"]) if str(p.get("municipal_rate") or "").strip() else None,

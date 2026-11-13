@@ -1497,9 +1497,14 @@ function viewPension(v) {
     } else {
       c.body.append(table([{label: "Rekening", get: r => r.name + (r.stale ? " (oude waarde)" : "")},
         {label: "Nu", num: true, get: r => r.type === "contributions" || r.type === "drawdown" ? "—" : eur(r.value)}, {label: k === 4 ? "Inleg / jaar" : "Premie / jaar", num: true, get: r => r.premium_assumed ? (r.premium_assumed < 0 ? eurS(r.premium_assumed) : eur(r.premium_assumed)) : "—"},
-        {label: "Bij pensioen*", num: true, get: r => r.type === "drawdown" ? eurS(r.projected_today_eur) : eur(r.expected_today_eur ?? r.projected_today_eur)}], p.accounts));
-      c.body.append(el("div", {class: "note", style: "margin-top:6px"}, `* euro van vandaag, ${pct(p.accounts[0].return_assumed)} rendement per jaar` +
-        (p.accounts.some(a => a.expected_at_retirement) ? "; waar ingevuld: bedrag van de pensioenfiche" : "") + (k === 4 ? "" : ` · na belasting ${eur(p.after_tax_today_eur)}`) + ` · ${eur(p.monthly_today_eur)} / maand`));
+        {label: "Bij pensioen", num: true, get: r => r.type === "drawdown" ? "—" : el("span", {title: r.expected_at_retirement ? "projectie van je pensioenfiche" : `${pct(r.return_assumed)} rendement per jaar`}, eur(r.expected_at_retirement ?? r.projected_nominal), r.expected_at_retirement ? el("span", {class: "chip", style: "margin-left:6px"}, "fiche") : null)},
+        {label: "In euro van nu*", num: true, get: r => r.type === "drawdown" ? eurS(r.projected_today_eur) : eur(r.expected_today_eur ?? r.projected_today_eur)}], p.accounts));
+      const fiche = p.accounts.filter(a => a.expected_at_retirement), own = p.accounts.filter(a => !a.expected_at_retirement && a.type !== "drawdown");
+      const rates = [...new Set(own.map(a => pct(a.return_assumed)))];
+      c.body.append(el("div", {class: "note", style: "margin-top:6px"}, `* gedeeld door ${pct(D.pension.profile.inflation)} inflatie per jaar tot je pensioen` +
+        (fiche.length ? ` · ‘fiche’: verwacht kapitaal van je pensioenfiche (${fiche.map(a => a.return_from_fiche ? `projectie aan ${pct(a.return_assumed)}` : "middelste projectie").join(", ")})` : "") +
+        (own.length ? ` · ${fiche.length ? "andere: " : ""}${rates.join(" / ")} rendement per jaar` : "") +
+        (k === 4 ? "" : ` · na belasting ${eur(p.after_tax_today_eur)}`) + ` · ${eur(p.monthly_today_eur)} / maand`));
     }
     g.append(c.root);
   }
@@ -1529,7 +1534,7 @@ function viewPension(v) {
     `Pensioenleeftijd ${pr.retirement_age}; ${pr.birth_date ? "geboren " + dLabel(pr.birth_date) : "geboortedatum nog niet ingevuld"}.`,
     O.stop_work_age < pr.retirement_age ? `Je stopt met werken op ${O.stop_work_age}: premies en nieuwe inleg lopen tot dan (nog ${num1.format(O.years_paying)} jaar), daarna leef je tot je pensioen van je eigen vermogen.`
       : `Premies en nieuwe inleg lopen door tot je pensioen. Vroeger stoppen? Vraag het Claude (stop_work_age) of probeer het in de Planner.`,
-    `Rendement 2e/3e pijler ${pct(pr.return_pension)}, eigen beleggingen ${pct(pr.return_investments)}, inflatie ${pct(pr.inflation)} per jaar.`,
+    `Rendement 2e/3e pijler ${pct(pr.return_pension)} (met een ingelezen pensioenfiche: het rendement van de projectie op die fiche), eigen beleggingen ${pct(pr.return_investments)}, inflatie ${pct(pr.inflation)} per jaar.`,
     `2e pijler: ongeveer ${pct(pr.payout_tax)} belasting en bijdragen bij uitkering, verdeeld tot ${pr.live_until} jaar. Eigen beleggingen: ${pct(pr.withdrawal_rate)} per jaar opnemen.`,
     `Pensioensparen ${O.limits_2026 ? "2026: max " + eur(O.limits_2026.pension_saving["30%"]) + " (30 %) of " + eur(O.limits_2026.pension_saving["25%"]) + " (25 %) per persoon" : ""}.`,
     O.notes])));

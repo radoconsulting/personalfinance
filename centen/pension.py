@@ -112,7 +112,7 @@ def set_profile(conn, reset: list[str] | None = None, **changes) -> dict:
         acc = AS.find(conn, name)
         cur = dict(p["accounts"].get(acc["name"]) or {})
         for k, v in (a or {}).items():
-            if k not in ("pillar", "expected_at_retirement", "premium_yearly"):
+            if k not in ("pillar", "expected_at_retirement", "premium_yearly", "return"):
                 raise ValueError(f"Unknown account setting '{k}'.")
             if v is None:
                 cur.pop(k, None)
@@ -120,6 +120,10 @@ def set_profile(conn, reset: list[str] | None = None, **changes) -> dict:
                 cur[k] = int(v) if k == "pillar" else float(v)
                 if k == "pillar" and cur[k] not in (2, 3, 4):
                     raise ValueError("pillar must be 2, 3 or 4")
+                if k == "return":
+                    cur[k] = cur[k] / 100 if cur[k] > 1 else cur[k]  # 6.7 or 0.067
+                    if not -0.05 <= cur[k] <= 0.15:
+                        raise ValueError("return must be between -5 % and 15 %")
         p["accounts"][acc["name"]] = cur
     db.set_meta(conn, META_KEY, json.dumps(p))
     conn.commit()
@@ -290,14 +294,15 @@ def overview(conn, today: date | None = None) -> dict:
         value = AS.counted_value(a)
         last12, ytd = _premiums(conn, a["name"], today)
         premium = s.get("premium_yearly", last12 if pil != 4 else 0.0)
-        r = p["return_pension"] if pil in (2, 3) else p["return_investments"]
+        # the return of the fiche's projection when you loaded one (r20), else the profile's
+        r = s.get("return", p["return_pension"] if pil in (2, 3) else p["return_investments"])
         proj = _fv(value, premium, r, years, paying) if years is not None else None
         exp = s.get("expected_at_retirement") if not early else None  # the fiche assumes premiums until the pension
         row = {"name": a["name"], "provider": a.get("provider"), "type": a["type"], "pillar": pil, "value": r2(value),
                "value_date": (a.get("value_entered") or {}).get("date"), "contributions": a.get("contributions"),
                "premium_last_12m": r2(last12), "premium_this_year": r2(ytd), "premium_assumed": r2(premium),
                "paid_by": sorted((a.get("contributions_by_payer") or {a["scope"]: 1}).keys()),
-               "return_assumed": r, "projected_nominal": r2(proj),
+               "return_assumed": r, "return_from_fiche": "return" in s, "projected_nominal": r2(proj),
                "projected_today_eur": r2(proj / infl) if proj is not None else None,
                "expected_at_retirement": r2(exp), "expected_today_eur": r2(exp / infl) if exp and years is not None else None,
                "stale": a.get("stale", False)}
@@ -485,6 +490,17 @@ def _nn_style(lines: list[str], found: dict, today: date | None = None) -> None:
                 found["expected"] = {"amount": round(a[len(a) // 2], 2), "line": ln[:160] + " (middelste projectie)",
                                      "date": _iso(d) if d else None}
                 break
+    # the return behind the expected capital: the hypotheses of the second (realistic) projection
+    for i, ln in enumerate(lines):
+        if re.search(r"tweede\s+projectie|deuxi[eè]me\s+projection", ln, re.I):
+            rates = []
+            for j in range(i + 1, min(i + 10, len(lines))):
+                if re.search(r"derde\s+projectie|troisi[eè]me\s+projection", lines[j], re.I):
+                    break
+                rates += [float(x.replace(",", ".")) for x in re.findall(r"(-?\d{1,2},\d{1,2})\s*%", lines[j])]
+            if rates and "expected" in found:
+                found["expected"]["return"] = round(sum(rates) / len(rates) / 100, 4)
+            break
     # premium: "Jaarlijkse premies van A tot B" blocks → the one running now, its pension part
     blocks = []
     for i, ln in enumerate(lines):
@@ -585,13 +601,15 @@ def import_statement(conn, path: str | None = None, account: str | None = None, 
         apply_values(conn, name, reserve=(found.get("reserve") or {}).get("amount"),
                      reserve_date=(found.get("reserve") or {}).get("date") or found.get("statement_date"),
                      expected=(found.get("expected") or {}).get("amount"),
-                     premium=(found.get("premium") or {}).get("amount"), today=today)
+                     premium=(found.get("premium") or {}).get("amount"), today=today,
+                     return_=(found.get("expected") or {}).get("return"))
         out["applied"] = True
     return out
 
 
 def apply_values(conn, account: str, reserve: float | None = None, reserve_date: str | None = None,
-                 expected: float | None = None, premium: float | None = None, today: date | None = None) -> dict:
+                 expected: float | None = None, premium: float | None = None, today: date | None = None,
+                 return_: float | None = None) -> dict:
     acc = AS.find(conn, account)
     if reserve is not None:
         AS.set_value(conn, acc["name"], float(reserve), reserve_date, today=today)
@@ -600,7 +618,9 @@ def apply_values(conn, account: str, reserve: float | None = None, reserve_date:
         settings["expected_at_retirement"] = float(expected)
     if premium is not None:
         settings["premium_yearly"] = float(premium)
+    if return_ is not None:
+        settings["return"] = float(return_)
     if settings:
         set_profile(conn, accounts={acc["name"]: settings})
     return {"account": acc["name"], "reserve": reserve, "reserve_date": reserve_date, "expected": expected,
-            "premium": premium}
+            "premium": premium, "return": return_}

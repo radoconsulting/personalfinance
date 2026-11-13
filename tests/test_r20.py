@@ -112,3 +112,21 @@ def test_mypension_certificate_and_reminder(conn):
     assert kinds(date(2026, 9, 20))
     conn.execute("UPDATE balances SET as_of='2026-09-10' WHERE account_id=? AND balance_type='valuation'", (r[0],))
     assert not kinds(date(2026, 9, 20))
+
+
+def test_fiche_return_used(conn):
+    from centen import pension
+    txt = NN_CERT + """(3) Tweede projectie berekend op basis van de volgende hypothesen:
+• jaarlijks rendement van 'Fonds A': 6,60%;
+• jaarlijks rendement van 'Fonds B': 6,70%.
+(4) Derde projectie berekend op basis van de volgende hypothesen:
+• jaarlijks rendement van 'Fonds A': 8,00%;
+"""
+    f = pension.parse_statement_text(txt)
+    assert f["expected"]["return"] == pytest.approx(0.0665)
+    pension.set_profile(conn, birth_date="1988-01-28")
+    acc = pension.overview(conn, T)["pillars"][1]["accounts"][0]["name"]
+    pension.import_statement(conn, text=txt, account=acc, apply=True, today=T)
+    a = pension.overview(conn, T)["pillars"][1]["accounts"][0]
+    assert a["return_assumed"] == pytest.approx(0.0665) and a["return_from_fiche"]
+    assert a["expected_at_retirement"] == 959662.61
