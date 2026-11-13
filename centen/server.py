@@ -971,19 +971,40 @@ def set_pension_profile(birth_date: Optional[str] = None, retirement_age: Option
                         return_pension: Optional[float] = None, return_investments: Optional[float] = None,
                         inflation: Optional[float] = None, payout_tax: Optional[float] = None,
                         withdrawal_rate: Optional[float] = None, live_until: Optional[int] = None,
-                        accounts: Optional[list[PensionAccountSetting]] = None) -> str:
+                        accounts: Optional[list[PensionAccountSetting]] = None,
+                        spending_monthly: Optional[float] = None, investing_yearly: Optional[float] = None,
+                        investing_years: Optional[int] = None, one_off_threshold: Optional[float] = None,
+                        reset: Optional[list[Literal["spending_monthly", "investing_yearly", "investing_years",
+                                                     "one_off_threshold", "legal_pension_monthly"]]] = None) -> str:
     """Save what the pension overview and the planner need: birth_date (YYYY-MM-DD), retirement_age (default 67),
     legal_pension_monthly (gross per month in today's euros, from mypension.be), assumptions as fractions (0.025 =
     2,5 %): return_pension (pillars 2/3), return_investments (pillar 4), inflation, payout_tax (2nd pillar),
     withdrawal_rate; per pension account: pillar (2/3/4), expected_at_retirement (from the pension fiche) or
-    premium_yearly. Only what you pass changes."""
+    premium_yearly. Spending and investing come from history by default: spending_monthly overrides the spending
+    profile (normally the last 12 months without one-offs), investing_yearly overrides the yearly new money into own
+    investments (normally the average over investing_years, default 5), one_off_threshold (default 10000) is the size
+    from which a single expense counts as one-off. reset puts the listed settings back to automatic. Only what you
+    pass changes."""
     from . import pension
     acc = {a["account"]: {k: v for k, v in a.items() if k != "account"} for a in (accounts or [])}
     return _edit_call(lambda c: pension.set_profile(
         c, birth_date=birth_date, retirement_age=retirement_age, legal_pension_monthly=legal_pension_monthly,
         partner_legal_pension_monthly=partner_legal_pension_monthly, return_pension=return_pension,
         return_investments=return_investments, inflation=inflation, payout_tax=payout_tax,
-        withdrawal_rate=withdrawal_rate, live_until=live_until, accounts=acc))
+        withdrawal_rate=withdrawal_rate, live_until=live_until, accounts=acc, spending_monthly=spending_monthly,
+        investing_yearly=investing_yearly, investing_years=investing_years, one_off_threshold=one_off_threshold,
+        reset=reset))
+
+
+@_tool(LOCAL_EDIT)
+def mark_one_off(transaction_ids: list[str], one_off: Optional[bool] = True) -> str:
+    """Leave payments out of the spending profile used by the pension overview and the planner (a car, a renovation,
+    a one-time tax): one_off=True. one_off=False counts a payment that was left out automatically after all;
+    one_off=None goes back to automatic. Expenses of € 10.000 or more that don't come back yearly are left out
+    automatically (one_off_threshold in set_pension_profile). Find the ids with search_transactions or in
+    pension_overview → spending_profile.one_offs. Doesn't change the payment itself or its category."""
+    from . import pension
+    return _edit_call(lambda c: pension.mark_one_off(c, transaction_ids, one_off))
 
 
 @_tool(READ)

@@ -43,7 +43,15 @@ def inputs(conn, today: date | None = None) -> dict:
     flows = A.cashflow(conn, 13, today, perspective="total")
     full = [m for m in flows if not m["partial"]][-12:]
     saving_m = sum(m["net"] for m in full) / len(full) if full else 0.0
-    spend_y = A.breakdown(conn, today - timedelta(days=365), today, perspective="personal")["total"]
+    # One-off purchases (a car, a renovation) aren't part of what you can save each month: add them back.
+    offs_saving = 0.0
+    if full:
+        w0 = date.fromisoformat(full[0]["month"] + "-01")
+        w1 = A.add_months(date.fromisoformat(full[-1]["month"] + "-01"), 1) - timedelta(days=1)
+        offs_saving = sum(o["amount"] for o in pension.one_offs(conn, w0, w1)) / len(full)
+        saving_m += offs_saving
+    sp = pension.spending_profile(conn, today)
+    spend_y = (sp["monthly"] or 0) * 12
     lo = loans.overview(conn, today) if conn.execute("SELECT 1 FROM loan_terms LIMIT 1").fetchone() else {"loans": []}
     loan_list = [{"name": x["account"], "instalment_monthly": x.get("instalment"), "ends": x.get("maturity_date"),
                   "outstanding": x.get("outstanding_now")} for x in lo.get("loans", [])]
@@ -57,12 +65,14 @@ def inputs(conn, today: date | None = None) -> dict:
         "pension_capital_now": r2(p23_now), "pension_capital_at_retirement_today_eur": r2(p23_at_ret),
         "legal_pension_monthly": prof.get("legal_pension_monthly"),
         "monthly_saving": r2(saving_m), "annual_spending": r2(spend_y),
+        "one_offs_added_back_monthly": r2(offs_saving), "one_offs": sp["one_offs"],
         "loans": loan_list, "return": DEFAULTS["return"], "inflation": prof.get("inflation", DEFAULTS["inflation"]),
         "withdrawal_rate": prof.get("withdrawal_rate", DEFAULTS["withdrawal_rate"]),
         "company_extraction_tax": DEFAULTS["company_extraction_tax"], "include_company": True,
         "notes": "monthly_saving = income − spending of the last 12 complete months for you and the company together "
-                 "(cash basis, before money put into investments). annual_spending = your personal spending of the "
-                 "last 12 months, loan instalments included. Pension capital (pillars 2/3) is counted from the "
+                 "(cash basis, before money put into investments, one-off purchases added back). annual_spending = "
+                 "your personal spending profile (last 12 months without one-offs, or your own figure), loan "
+                 "instalments included. Pension capital (pillars 2/3) is counted from the "
                  "pension date, after tax. Company money counts after the extraction tax.",
     }
 

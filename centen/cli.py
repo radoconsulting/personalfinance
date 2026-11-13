@@ -230,8 +230,11 @@ def cmd_forecast(a):
 def cmd_pension(a):
     from . import pension
     with closing(db.connect()) as conn:
-        if a.birth_date or a.legal is not None or a.age is not None:
-            pension.set_profile(conn, birth_date=a.birth_date, legal_pension_monthly=a.legal, retirement_age=a.age)
+        if a.one_off or a.keep:
+            pension.mark_one_off(conn, a.one_off or a.keep, True if a.one_off else False)
+        if any(x is not None for x in (a.birth_date, a.legal, a.age, a.spending, a.investing)) or a.auto:
+            pension.set_profile(conn, birth_date=a.birth_date, legal_pension_monthly=a.legal, retirement_age=a.age,
+                                spending_monthly=a.spending, investing_yearly=a.investing, reset=a.auto or None)
         o = pension.overview(conn)
     if a.json:
         return _print(o)
@@ -240,6 +243,12 @@ def cmd_pension(a):
         print(f"  {p['label']:48} nu {_eur(p.get('value_now'))}  per maand later {_eur(p.get('monthly_today_eur'))}")
     print(f"  samen per maand (euro van vandaag) {_eur(o['monthly_income_today_eur'])}  "
           f"uitgaven nu {_eur(o['spending_monthly_now'])}")
+    sp, inv = o["spending_profile"], o["investing"]
+    print(f"  uitgavenprofiel {_eur(sp['monthly'])}/maand{' (zelf ingesteld)' if sp['override'] else ''}; "
+          f"niet meegeteld: {_eur(sp['one_offs_total'])}")
+    for x in sp["one_offs"]:
+        print(f"    {x['date']} {(x['merchant'] or '')[:30]:30} {_eur(x['amount'])} ({x['reason']}) id {x['id']}")
+    print(f"  nieuwe inleg beleggingen {_eur(inv['yearly'])}/jaar{' (zelf ingesteld)' if inv['override'] else ''}")
     for c in o["checks"]:
         print("  · " + c["text"])
 
@@ -863,6 +872,12 @@ def build_parser():
     s.add_argument("--birth-date", dest="birth_date")
     s.add_argument("--legal", type=float, help="legal pension per month from mypension.be")
     s.add_argument("--age", type=int, help="retirement age (default 67)")
+    s.add_argument("--spending", type=float, help="spending per month for the projection (instead of history)")
+    s.add_argument("--investing", type=float, help="new money into investments per year (instead of history)")
+    s.add_argument("--auto", nargs="+", choices=["spending_monthly", "investing_yearly", "one_off_threshold"],
+                   help="back to the figure from history")
+    s.add_argument("--one-off", dest="one_off", nargs="+", metavar="ID", help="leave these payments out of spending")
+    s.add_argument("--keep", nargs="+", metavar="ID", help="count these payments after all")
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_pension)
 

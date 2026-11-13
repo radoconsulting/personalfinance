@@ -247,3 +247,67 @@ def test_icons_are_valid_pngs():
         assert b[:8] == b"\x89PNG\r\n\x1a\n" and len(b) > 300
     assert pwa.icon("nope.png") is None
     assert '<link rel="manifest"' in pwa.inject("<html><head></head><body></body></html>")
+
+
+# --- r17b: one-offs out of the spending profile, investing pattern in the pension projection ------------------
+
+def _big(conn, tid, d, amount, merchant="Porsche Center", category="Car & maintenance"):
+    acc = conn.execute("SELECT id FROM accounts WHERE account_type='current'").fetchone()[0]
+    db.insert_transactions(conn, [dict(id=tid, account_id=acc, booking_date=d, amount=amount, status="booked",
+                                       counterparty_name=merchant, merchant=merchant,
+                                       merchant_key=merchant.lower().split()[0], category=category, kind="expense",
+                                       source="test")])
+
+
+def test_one_offs_left_out_of_spending_profile(full):
+    base = pension.spending_profile(full, TODAY)
+    _big(full, "car", "2026-07-16", -139000.0)
+    _big(full, "tax", "2026-09-29", -17538.85, "Vlaamse Belastingdienst", "Taxes & social security")
+    _big(full, "wrap", "2026-08-10", -4779.5, "DRX Exclusive")
+    # a yearly bill of the same size a year earlier is not a one-off
+    _big(full, "ins1", "2025-10-01", -12000.0, "Big Insurer", "Insurance")
+    _big(full, "ins2", "2026-10-01", -12100.0, "Big Insurer", "Insurance")
+    sp = pension.spending_profile(full, TODAY)
+    ids = {o["id"] for o in sp["one_offs"]}
+    assert ids == {"car", "tax"}
+    assert sp["monthly_raw"] == pytest.approx(base["monthly_raw"] + (139000 + 17538.85 + 4779.5 + 12100) / 12, abs=0.05)
+    assert sp["monthly"] == pytest.approx(sp["monthly_raw"] - (139000 + 17538.85) / 12, abs=0.05)
+    pension.mark_one_off(full, ["wrap"], True)
+    pension.mark_one_off(full, ["tax"], False)
+    ids = {o["id"]: o["reason"] for o in pension.spending_profile(full, TODAY)["one_offs"]}
+    assert ids == {"car": "auto", "wrap": "manual"}
+    pension.mark_one_off(full, ["tax"], None)
+    assert "tax" in {o["id"] for o in pension.spending_profile(full, TODAY)["one_offs"]}
+    with pytest.raises(ValueError):
+        pension.mark_one_off(full, ["nope"])
+    pension.set_profile(full, spending_monthly=5000)
+    o = pension.overview(full, TODAY)
+    assert o["spending_monthly_now"] == 5000 and o["spending_profile"]["override"]
+    pension.set_profile(full, reset=["spending_monthly"])
+    assert not pension.overview(full, TODAY)["spending_profile"]["override"]
+    # the planner uses the same profile and adds the one-offs back to what you can save
+    pension.set_profile(full, birth_date="1988-01-28")
+    inp = planner.inputs(full, TODAY)
+    assert inp["annual_spending"] == pytest.approx(pension.spending_profile(full, TODAY)["monthly"] * 12, abs=1)
+    assert inp["one_offs_added_back_monthly"] > 0
+
+
+def test_investing_pattern_feeds_pillar_4(full):
+    pension.set_profile(full, birth_date="1988-01-28")
+    acc = assets.find(full, "Broker")["id"]
+    rows = [("d1", "2022-03-01", 20000.0), ("d2", "2024-05-01", 30000.0), ("d3", "2026-02-01", 50000.0),
+            ("w1", "2025-06-01", -10000.0)]
+    for i, d, amt in rows:
+        full.execute("INSERT INTO inv_transactions(id, account_id, date, kind, amount, amount_eur, currency, source) "
+                     "VALUES (?,?,?,?,?,?,'EUR','test')", (i, acc, d, "deposit" if amt > 0 else "withdrawal", amt, amt))
+    full.commit()
+    o = pension.overview(full, TODAY)
+    inv = o["investing"]
+    assert {r["year"]: r["net"] for r in inv["per_year"]} == {"2022": 20000.0, "2024": 30000.0, "2025": -10000.0, "2026": 50000.0}
+    assert inv["yearly"] == pytest.approx(90000 / ((TODAY - date(2022, 3, 1)).days / 365.25), abs=1) and not inv["override"]
+    p4 = [p for p in o["pillars"] if p["pillar"] == 4][0]
+    new = [r for r in p4["accounts"] if r["type"] == "contributions"][0]
+    assert new["premium_assumed"] == inv["yearly"] and new["projected_nominal"] > inv["yearly"] * 28
+    pension.set_profile(full, investing_yearly=0)
+    p4 = [p for p in pension.overview(full, TODAY)["pillars"] if p["pillar"] == 4][0]
+    assert not any(r["type"] == "contributions" for r in p4["accounts"])

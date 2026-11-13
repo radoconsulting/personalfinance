@@ -33,6 +33,12 @@ DEFAULTS = {
     "payout_tax": 0.165,              # rough total tax and contributions on a 2nd pillar capital at pension age
     "withdrawal_rate": 0.035,         # pillar 4: what you can take out per year
     "live_until": 90,
+    "one_off_threshold": 10000.0,     # a single expense this big counts as one-off (unless it came a year earlier too)
+    "one_off_exclude": [],            # transaction ids the user marked as one-off
+    "one_off_include": [],            # transaction ids the user wants counted after all
+    "spending_monthly": None,         # override of the spending profile (per month)
+    "investing_yearly": None,         # override of the yearly new money into your own investments (pillar 4)
+    "investing_years": 5,             # window for the historical pattern
     "accounts": {},                   # name -> {"pillar": 2|3|4, "expected_at_retirement": float, "premium_yearly": float}
 }
 # 2026 figures (income year 2026, assessment year 2027).
@@ -64,9 +70,13 @@ def profile(conn) -> dict:
     return p
 
 
-def set_profile(conn, **changes) -> dict:
+def set_profile(conn, reset: list[str] | None = None, **changes) -> dict:
     p = profile(conn)
     accounts = changes.pop("accounts", None) or {}
+    for k in reset or []:
+        if k not in DEFAULTS or k == "accounts":
+            raise ValueError(f"Can't reset '{k}'.")
+        p[k] = json.loads(json.dumps(DEFAULTS[k]))
     for k, v in changes.items():
         if v is None:
             continue
@@ -84,6 +94,12 @@ def set_profile(conn, **changes) -> dict:
             v = int(v)
             if not 50 <= v <= 110:
                 raise ValueError(f"{k} looks wrong: {v}")
+        elif k == "investing_years":
+            v = int(v)
+            if not 1 <= v <= 15:
+                raise ValueError("investing_years must be 1 to 15")
+        elif k in ("one_off_exclude", "one_off_include"):
+            raise ValueError(f"Use mark_one_off for {k}.")
         else:
             v = float(v)
         p[k] = v
@@ -131,6 +147,101 @@ def _premiums(conn, acc_name: str, today: date) -> tuple[float, float]:
     return max(0.0, last12), max(0.0, ytd)
 
 
+KEEP_CATEGORIES = {"Loans & mortgage"}  # never a one-off: the instalments are part of the spending profile
+
+
+def _comes_back(conn, r) -> bool:
+    """A big payment to the same merchant for about the same amount 11 to 13 months earlier: a yearly bill."""
+    if not r["merchant_key"] or r["merchant_key"] == "unknown":
+        return False
+    d = date.fromisoformat(r["booking_date"][:10])
+    amt = -r["amount"]
+    return conn.execute("SELECT 1 FROM transactions WHERE merchant_key=? AND kind='expense' AND booking_date BETWEEN ? "
+                        "AND ? AND -amount BETWEEN ? AND ? LIMIT 1",
+                        (r["merchant_key"], (d - timedelta(days=400)).isoformat(),
+                         (d - timedelta(days=330)).isoformat(), amt * 0.7, amt * 1.3)).fetchone() is not None
+
+
+def one_offs(conn, start: date, end: date, p: dict | None = None) -> list[dict]:
+    """Personal expenses between start and end that don't belong in the spending profile: single payments of at
+    least the threshold that don't come back yearly, plus what the user marked; minus what the user kept."""
+    p = p or profile(conn)
+    excl, incl = set(p.get("one_off_exclude") or []), set(p.get("one_off_include") or [])
+    thr = float(p.get("one_off_threshold") or DEFAULTS["one_off_threshold"])
+    out = []
+    for r in A.fetch(conn, start, end, kinds=["expense"], perspective="personal", include_pending=False):
+        if r["id"] in incl:
+            continue
+        reason = None
+        if r["id"] in excl:
+            reason = "manual"
+        elif -r["amount"] >= thr and r["category"] not in KEEP_CATEGORIES and not _comes_back(conn, r):
+            reason = "auto"
+        if reason:
+            out.append({"id": r["id"], "date": r["booking_date"], "merchant": r["merchant"], "category": r["category"],
+                        "amount": r2(-r["amount"]), "reason": reason})
+    return sorted(out, key=lambda x: -x["amount"])
+
+
+def spending_profile(conn, today: date | None = None, p: dict | None = None) -> dict:
+    """Personal spending per month over the last 12 months without one-offs (or the user's own figure)."""
+    today = today or date.today()
+    p = p or profile(conn)
+    start = today - timedelta(days=365)
+    raw = A.breakdown(conn, start, today, perspective="personal")["total"] or 0.0
+    offs = one_offs(conn, start, today, p)
+    left = raw - sum(o["amount"] for o in offs)
+    auto = left / 12
+    override = p.get("spending_monthly")
+    return {"monthly": r2(override if override is not None else auto), "monthly_from_history": r2(auto),
+            "monthly_raw": r2(raw / 12), "override": override is not None, "one_offs": offs,
+            "one_offs_total": r2(sum(o["amount"] for o in offs)),
+            "threshold": float(p.get("one_off_threshold") or DEFAULTS["one_off_threshold"]),
+            "from": start.isoformat(), "to": today.isoformat()}
+
+
+def mark_one_off(conn, transaction_ids: list[str], one_off: bool | None = True) -> dict:
+    """one_off True = leave out of the spending profile, False = count it after all, None = back to automatic."""
+    p = profile(conn)
+    excl, incl = set(p["one_off_exclude"] or []), set(p["one_off_include"] or [])
+    found = []
+    for tid in transaction_ids:
+        row = conn.execute("SELECT id, booking_date, merchant, amount FROM transactions WHERE id=?", (tid,)).fetchone()
+        if row is None:
+            raise ValueError(f"No transaction with id {tid} (search_transactions shows the ids).")
+        excl.discard(tid)
+        incl.discard(tid)
+        if one_off is True:
+            excl.add(tid)
+        elif one_off is False:
+            incl.add(tid)
+        found.append({"id": tid, "date": row["booking_date"], "merchant": row["merchant"], "amount": row["amount"]})
+    p["one_off_exclude"], p["one_off_include"] = sorted(excl), sorted(incl)
+    db.set_meta(conn, META_KEY, json.dumps(p))
+    conn.commit()
+    return {"updated": found, "one_off": one_off}
+
+
+def investing_pattern(conn, today: date, p: dict, accounts: list[dict]) -> dict:
+    """New money into your own investments (pillar 4) per year, and the yearly average over the window."""
+    years = int(p.get("investing_years") or 5)
+    start = today - timedelta(days=round(365.25 * years))
+    per_year, flows_all = {}, []
+    for a in accounts:
+        flows, _ = AS.contribution_flows(conn, a["id"])
+        for d, amt, _payer in flows:
+            per_year[d[:4]] = per_year.get(d[:4], 0.0) + amt
+            flows_all.append((d[:10], amt))
+    window = [f for f in flows_all if date.fromisoformat(f[0]) > start]
+    first = min((date.fromisoformat(f[0]) for f in flows_all), default=None)
+    span = years if first is None or first <= start else max(1.0, (today - first).days / 365.25)
+    avg = max(0.0, sum(f[1] for f in window) / span) if flows_all else 0.0
+    override = p.get("investing_yearly")
+    return {"yearly": r2(override if override is not None else avg), "yearly_from_history": r2(avg),
+            "override": override is not None, "window_years": round(span, 1),
+            "per_year": [{"year": y, "net": r2(v)} for y, v in sorted(per_year.items())]}
+
+
 def overview(conn, today: date | None = None) -> dict:
     today = today or date.today()
     p = profile(conn)
@@ -148,6 +259,7 @@ def overview(conn, today: date | None = None) -> dict:
     infl = (1 + p["inflation"]) ** (years or 0)
 
     pillars = {2: [], 3: [], 4: []}
+    p4_accounts = []
     for a in AS.list_accounts(conn, today):
         if a["type"] not in ("pension", "insurance", "investment", "crypto"):
             continue
@@ -155,6 +267,8 @@ def overview(conn, today: date | None = None) -> dict:
             continue  # company investments are the company's, not your pension
         s = p["accounts"].get(a["name"]) or {}
         pil = pillar_of(a, s)
+        if pil == 4:
+            p4_accounts.append(a)
         value = AS.counted_value(a)
         last12, ytd = _premiums(conn, a["name"], today)
         premium = s.get("premium_yearly", last12 if pil != 4 else 0.0)
@@ -171,13 +285,23 @@ def overview(conn, today: date | None = None) -> dict:
                "stale": a.get("stale", False)}
         pillars[pil].append(row)
 
+    inv = investing_pattern(conn, today, p, [{"id": AS.find(conn, a["name"])["id"]} for a in p4_accounts])
+    if inv["yearly"] and years is not None:
+        proj = _fv(0.0, inv["yearly"], p["return_investments"], years)
+        pillars[4].append({"name": "Nieuwe inleg tot je pensioen", "provider": None, "type": "contributions", "pillar": 4,
+                           "value": 0.0, "value_date": None, "contributions": None, "premium_last_12m": None,
+                           "premium_this_year": None, "premium_assumed": inv["yearly"], "paid_by": ["personal"],
+                           "return_assumed": p["return_investments"], "projected_nominal": r2(proj),
+                           "projected_today_eur": r2(proj / infl), "expected_at_retirement": None,
+                           "expected_today_eur": None, "stale": False})
+
     def cap(rows, key_nom, key_real):
         nom = sum((x["expected_at_retirement"] or x[key_nom] or 0) for x in rows)
         real = sum((x["expected_today_eur"] or x[key_real] or 0) for x in rows)
         return r2(nom), r2(real)
 
-    spend = A.breakdown(conn, today - timedelta(days=365), today, perspective="personal")["total"]
-    spend_m = spend / 12 if spend else None
+    sp = spending_profile(conn, today, p)
+    spend_m = sp["monthly"] or None
     payout_years = max(1, p["live_until"] - p["retirement_age"])
     out_p = []
     monthly_income = 0.0
@@ -203,7 +327,7 @@ def overview(conn, today: date | None = None) -> dict:
     legal = p["legal_pension_monthly"]
     out_p.insert(0, {"pillar": 1, "label": "1e pijler: wettelijk pensioen", "monthly_today_eur": r2(legal),
                      "partner_monthly_today_eur": r2(p["partner_legal_pension_monthly"]),
-                     "method": "raming van mypension.be (bruto, euro van vandaag)" if legal is not None else
+                     "method": "jouw raming (bruto, euro van vandaag)" if legal is not None else
                      "nog niet ingevuld: zoek de raming op mypension.be en geef ze in (set_pension_profile)",
                      "accounts": []})
     total_m = monthly_income + (legal or 0)
@@ -242,7 +366,7 @@ def overview(conn, today: date | None = None) -> dict:
         "years_to_retirement": round(years, 1) if years is not None else None,
         "age_now": round((today - date.fromisoformat(p["birth_date"])).days / 365.25, 1) if p["birth_date"] else None,
         "pillars": out_p, "monthly_income_today_eur": r2(total_m) if years is not None else None,
-        "spending_monthly_now": r2(spend_m),
+        "spending_monthly_now": r2(spend_m), "spending_profile": sp, "investing": inv,
         "replacement_ratio": round(total_m / spend_m, 3) if spend_m and years is not None else None,
         "gap_monthly_today_eur": r2(spend_m - total_m) if spend_m and years is not None else None,
         "checks": checks, "needs": needs,

@@ -1300,7 +1300,8 @@ function viewPension(v) {
       el("div", {class: "val"}, has ? eur(O.monthly_income_today_eur) : "—"),
       el("div", {class: "sub"}, has ? `vanaf ${dLabel(O.retirement_date)} · over ${num1.format(O.years_to_retirement)} jaar` + (O.replacement_ratio != null ? ` · ${pct(O.replacement_ratio)} van je uitgaven nu` : "")
         : "Geef je geboortedatum en de schatting van mypension.be in (vraag het Claude)")),
-    tile("Uitgaven nu per maand", eur(O.spending_monthly_now), "privé, laatste 12 maanden"),
+    tile("Uitgavenprofiel per maand", eur(O.spending_monthly_now), O.spending_profile.override ? "zelf ingesteld" :
+      `privé, laatste 12 maanden` + (O.spending_profile.one_offs.length ? `, zonder ${O.spending_profile.one_offs.length} eenmalige uitgave${O.spending_profile.one_offs.length > 1 ? "n" : ""} (${eur(O.spending_profile.one_offs_total)})` : "")),
     tile(O.gap_monthly_today_eur > 0 ? "Tekort per maand" : "Overschot per maand", has && O.gap_monthly_today_eur != null ? eur(Math.abs(O.gap_monthly_today_eur)) : "—", "t.o.v. je uitgaven nu"),
   ));
   if (has) {
@@ -1315,12 +1316,12 @@ function viewPension(v) {
     const c = card(p.label, p.method);
     if (k === 1) {
       c.body.append(el("div", {class: "tile"}, el("div", {class: "val"}, p.monthly_today_eur != null ? eur(p.monthly_today_eur) + " / maand" : "nog niet ingevuld"),
-        el("div", {class: "sub"}, p.partner_monthly_today_eur != null ? `partner: ${eur(p.partner_monthly_today_eur)} / maand` : "Bron: mypension.be → ‘Mijn pensioen’ → raming")));
+        el("div", {class: "sub"}, p.partner_monthly_today_eur != null ? `partner: ${eur(p.partner_monthly_today_eur)} / maand` : "Bijwerken zodra mypension.be (‘Mijn pensioen’ → raming) een bedrag toont")));
     } else if (!p.accounts.length) {
       c.body.append(el("div", {class: "empty"}, k === 3 ? "Geen pensioensparen of langetermijnsparen gevonden." : "Nog geen rekeningen in deze pijler."));
     } else {
       c.body.append(table([{label: "Rekening", get: r => r.name + (r.stale ? " (oude waarde)" : "")},
-        {label: "Nu", num: true, get: r => eur(r.value)}, {label: "Premie / jaar", num: true, get: r => r.premium_assumed ? eur(r.premium_assumed) : "—"},
+        {label: "Nu", num: true, get: r => r.type === "contributions" ? "—" : eur(r.value)}, {label: k === 4 ? "Inleg / jaar" : "Premie / jaar", num: true, get: r => r.premium_assumed ? eur(r.premium_assumed) : "—"},
         {label: "Bij pensioen*", num: true, get: r => eur(r.expected_today_eur ?? r.projected_today_eur)}], p.accounts));
       c.body.append(el("div", {class: "note", style: "margin-top:6px"}, `* euro van vandaag, ${pct(p.accounts[0].return_assumed)} rendement per jaar` +
         (p.accounts.some(a => a.expected_at_retirement) ? "; waar ingevuld: bedrag van de pensioenfiche" : "") + (k === 4 ? "" : ` · na belasting ${eur(p.after_tax_today_eur)}`) + ` · ${eur(p.monthly_today_eur)} / maand`));
@@ -1328,6 +1329,22 @@ function viewPension(v) {
     g.append(c.root);
   }
   v.append(g);
+  const SP = O.spending_profile, INV = O.investing;
+  const g3 = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});
+  const co = card("Niet meegeteld als uitgave", `Eenmalig: vanaf ${eur(SP.threshold)} per betaling automatisch (tenzij hetzelfde bedrag een jaar eerder ook betaald werd), of door jou aangeduid. Aanpassen: vraag het Claude of centen pension --one-off ID / --keep ID.`);
+  co.body.append(SP.one_offs.length ? table([{label: "Datum", get: r => dLabel(r.date)}, {label: "Wat", get: r => r.merchant || "—"},
+    {label: "Soort", get: r => cat(r.category)}, {label: "Bedrag", num: true, get: r => eur(r.amount)},
+    {label: "", get: r => r.reason === "manual" ? "door jou" : "automatisch"}], SP.one_offs) : el("div", {class: "empty"}, "Geen eenmalige uitgaven in de laatste 12 maanden."));
+  co.body.append(el("div", {class: "note", style: "margin-top:6px"}, SP.override ? `Je gebruikt zelf ${eur(SP.monthly)} per maand; uit de historiek zou het ${eur(SP.monthly_from_history)} zijn.` :
+    `Met alles meegeteld was het ${eur(SP.monthly_raw)} per maand.`));
+  g3.append(co.root);
+  const ci = card("Nieuwe inleg in je beleggingen", INV.override ? `Je rekent zelf met ${eur(INV.yearly)} per jaar (historisch gemiddelde ${eur(INV.yearly_from_history)}).` :
+    `Gebruikt: ${eur(INV.yearly)} per jaar, het gemiddelde van de laatste ${num1.format(INV.window_years)} jaar. Aanpassen: vraag het Claude of centen pension --investing <bedrag>.`, {table: () => table([
+      {label: "Jaar", get: r => r.year}, {label: "Netto ingelegd", num: true, get: r => eurS(r.net)}], INV.per_year)});
+  g3.append(ci.root);
+  requestAnimationFrame(() => INV.per_year.length ? hbars(ci.body, INV.per_year, {label: x => x.year, value: x => x.net, signed: true, max: 14}) :
+    ci.body.append(el("div", {class: "empty"}, "Nog geen stortingen gezien.")));
+  v.append(g3);
   const a = card("Aandachtspunten", null);
   a.body.append(O.checks.length ? el("div", {class: "alerts"}, O.checks.map(x => statusAlert(x.severity === "warning" ? "warning" : "info", x.text, null, null))) : el("div", {class: "empty"}, "Niets."));
   a.root.style.marginTop = "14px";
