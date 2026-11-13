@@ -62,8 +62,21 @@ def load() -> dict:
 
 
 def save(cfg: dict) -> Path:
+    """Write config.json atomically and private from the first byte (it can hold the Bitvavo secret): a temporary
+    file created with mode 0600 in the same folder, then renamed over the old one. A crash never leaves half a file."""
     p = config_path()
-    p.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    data = json.dumps(cfg, indent=2).encode("utf-8")
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, p)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     try:
         p.chmod(0o600)
     except OSError:

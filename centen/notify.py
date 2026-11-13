@@ -7,7 +7,7 @@ Install the ntfy app, subscribe to a topic with a long random name, and tell cen
 
 What is sent: the weekly digest headline, and once a day (08:30, config schedule.alerts) anything new that needs
 attention: a balance that is forecast to drop under your buffer, a possible double payment, an unusually high or a
-large new payment, a price increase of a fixed cost, a bank consent that is about to expire. Every alert is sent once.
+large new payment, a price increase of a fixed cost, a bank consent that is about to expire (14 and 3 days before) or a failed bank sync. Every alert is sent once.
 
 Privacy: with detail "short" (the default) a notification only says what kind of thing happened ("possible double
 payment", "price increase"), without names or amounts, because the message passes through the ntfy server. Use
@@ -29,7 +29,7 @@ SENT_KEY = "notified_alerts"
 _KIND_NL = {"possible_duplicate": "Mogelijk dubbele betaling", "higher_than_usual": "Hoger bedrag dan gewoonlijk",
             "large_new_merchant": "Grote betaling aan een nieuwe begunstigde", "price_increase": "Prijsstijging",
             "low_balance": "Saldo zakt onder je buffer", "below_zero": "Rekening dreigt onder nul te gaan",
-            "consent": "Bankkoppeling verloopt binnenkort", "fee": "Bankkosten of debetrente",
+            "consent": "Bankkoppeling verloopt binnenkort", "sync_error": "Bank synchroniseren mislukt", "fee": "Bankkosten of debetrente",
             "pension_fiche": "Nieuwe pensioenfiche op mypension.be"}
 
 
@@ -117,12 +117,23 @@ def collect(conn, today: date | None = None) -> list[dict]:
                         "text": w["text"], "amount": w.get("amount"), "scope": w["scope"]})
     except Exception:  # noqa: BLE001
         pass
-    for r in conn.execute("SELECT aspsp_name, valid_until FROM bank_links"):
-        if r["valid_until"]:
-            left = (date.fromisoformat(r["valid_until"][:10]) - today).days
-            if 0 <= left <= 7:
-                out.append({"id": f"consent|{r['aspsp_name']}|{r['valid_until'][:10]}", "kind": "consent",
-                            "text": f"{r['aspsp_name']}: toestemming verloopt over {left} dagen.", "amount": None})
+    from . import health
+    for l in health.links(conn, today):
+        left = l["days_left"]
+        if left is None:
+            continue
+        # two reminders per consent: 14 days and 3 days before it ends (and once when it has ended)
+        step = "verlopen" if left < 0 else ("3" if left <= 3 else ("14" if left <= 14 else None))
+        if step:
+            text = (f"{l['bank']}: bankkoppeling is verlopen; koppel opnieuw in centen (Bijwerken → Banken)."
+                    if left < 0 else f"{l['bank']}: bankkoppeling verloopt over {left} "
+                                     f"{'dag' if left == 1 else 'dagen'}; koppel opnieuw in centen (Bijwerken → Banken).")
+            out.append({"id": f"consent|{l['bank']}|{l['valid_until']}|{step}", "kind": "consent", "text": text,
+                        "amount": None})
+        if l["last_error"] and l["status"] == "active":
+            out.append({"id": f"sync_error|{l['bank']}|{l['last_error']['at'][:10]}", "kind": "sync_error",
+                        "text": f"{l['bank']}: synchronisatie mislukt ({l['last_error']['message'][:100]}).",
+                        "amount": None})
     # once a year, when mypension.be has the new figures (September), a reminder to load the pension fiche when the
     # values you entered are older than half a year (mypension.be has no API; logging in needs itsme or the eID)
     if today.month >= 9 and not (today.month == 9 and today.day < 15):
@@ -164,7 +175,8 @@ def run_alerts(conn, today: date | None = None, client=None, dry_run: bool = Fal
         kinds = sorted({_KIND_NL.get(i["kind"], i["kind"]) for i in new})
         body = "\n".join(f"• {k}" for k in kinds) + "\nOpen centen voor de details."
     title = f"centen: {len(new)} {'melding' if len(new) == 1 else 'meldingen'}"
-    prio = "high" if any(i["kind"] in ("below_zero", "possible_duplicate") for i in new) else "default"
+    prio = "high" if any(i["kind"] in ("below_zero", "possible_duplicate") or i["id"].endswith(("|3", "|verlopen"))
+                         for i in new) else "default"
     ok = dry_run or send(title, body, prio, "warning" if prio == "high" else "bell", client=client)
     if ok and not dry_run:
         db.set_meta(conn, SENT_KEY, json.dumps((sent + [_h(i["id"]) for i in new])[-400:]))

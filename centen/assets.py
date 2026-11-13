@@ -167,6 +167,12 @@ def _contrib_at(contribs, flows, t: date | None) -> float | None:
     return _cum(flows, t)
 
 
+def _history_start(conn) -> str | None:
+    """First day of bank history on your own linked or imported accounts."""
+    return conn.execute("SELECT MIN(t.booking_date) FROM transactions t JOIN accounts a ON a.id=t.account_id "
+                        "WHERE a.source NOT IN ('asset', 'manual')").fetchone()[0]
+
+
 def _newest_data(conn) -> str | None:
     return conn.execute("SELECT MAX(booking_date) FROM transactions").fetchone()[0]
 
@@ -217,7 +223,24 @@ def describe(conn, acc_id: str, today: date | None = None, newest: str | None = 
         out["contributions_entered"] = {"amount": r2(contribs[-1][1]), "date": contribs[-1][0]} if contribs else None
         if len(by_payer) > 1 or (by_payer and next(iter(by_payer)) != out["scope"]):
             out["contributions_by_payer"] = {k: r2(v) for k, v in by_payer.items()}
-        if out["value"] is not None and c is not None:
+        # Contributions from bank transfers only cover the bank history. When the account already had a value before
+        # that history starts, earlier deposits are missing and
+        # value − contributions would count them as return (r22: DEGIRO showed +330 %). Then no return is given until
+        # the total contributions are entered once, or a full broker history is imported.
+        complete = True
+        if not contribs and source != "broker export" and flows:
+            hist = _history_start(conn)
+            first_val = values[0][0] if values else None
+            if hist and first_val and _d(first_val) < _d(hist):
+                complete = False
+                out["contributions_since"] = hist
+            elif hist and (_d(flows[0][0]) - _d(hist)).days <= 31:
+                # payments already run when the history starts: there may well be older ones. The return is still
+                # shown, flagged, until the total contributions are entered once.
+                out["contributions_uncertain"] = True
+                out["contributions_since"] = hist
+        out["contributions_complete"] = complete
+        if out["value"] is not None and c is not None and complete:
             out["gain"] = r2(out["value"] - c)
             out["gain_pct"] = round((out["value"] - c) / c, 4) if c > 0 else None
         if out["value"] is None and c is not None and typ in INVESTING_ASSET_TYPES:
@@ -577,7 +600,9 @@ def summary(conn, today: date | None = None) -> dict:
     for a in inv + prop + things:
         by_type[a["type"]] += counted_value(a)
         by_scope[a["scope"]] += counted_value(a)
-    valued = [a for a in inv if a.get("value") is not None and a.get("contributions") is not None]
+    valued = [a for a in inv if a.get("value") is not None and a.get("contributions") is not None
+              and a.get("contributions_complete", True)]
+    incomplete = [a["name"] for a in inv if a.get("value") is not None and not a.get("contributions_complete", True)]
     contrib = sum(a["contributions"] for a in valued)
     gain = sum(a["gain"] for a in valued)
     un_pos = sum(max(0.0, u["net_deposited"]) for u in un)
@@ -589,6 +614,9 @@ def summary(conn, today: date | None = None) -> dict:
         "investments_contributions": r2(sum(a["contributions"] or 0 for a in inv)),
         "gain_on_valued_accounts": r2(gain) if valued else None,
         "gain_pct": round(gain / contrib, 4) if valued and contrib > 0 else None,
+        "gain_excluded": incomplete,
+        "gain_uncertain": [a["name"] for a in valued if a.get("contributions_uncertain")],
+        "history_start": _history_start(conn),
         "property": r2(sum(counted_value(a) for a in prop)),
         "possessions": r2(sum(counted_value(a) for a in things)),
         "loans_outstanding": r2(sum(a.get("outstanding") or 0 for a in loans)),

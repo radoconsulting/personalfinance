@@ -271,3 +271,16 @@ def test_tools_are_registered():
     names = {t.name for t in asyncio.run(server.server.list_tools())}
     assert {"list_assets", "add_asset_account", "set_asset_value", "update_asset_account", "set_positions",
             "import_positions", "remove_asset_account"} <= names
+
+
+def test_no_return_when_deposits_before_the_bank_history_are_missing(biz):  # noqa: F811
+    first = biz.execute("SELECT MIN(booking_date) FROM transactions").fetchone()[0]
+    assets.add_account(biz, "DEGIRO", "investment", 50000.0, "2024-01-01", today=TODAY)  # valued before the history
+    assets.set_value(biz, "degiro", 60000.0, "2026-11-01", today=TODAY)
+    a = assets.describe(biz, "asset:degiro", TODAY)
+    assert a["contributions_complete"] is False and "gain" not in a and a["contributions_since"] == first
+    t = assets.summary(biz, TODAY)["totals"]
+    assert t["gain_on_valued_accounts"] is None and t["gain_excluded"] == ["DEGIRO"]
+    assets.update_account(biz, "degiro", contributions=45000.0, contributions_date="2026-11-01")
+    a = assets.describe(biz, "asset:degiro", TODAY)
+    assert a["contributions_complete"] and a["gain"] == 15000.0

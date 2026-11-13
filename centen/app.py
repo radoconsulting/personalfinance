@@ -3,10 +3,11 @@ balances, values of pension and insurance contracts and other accounts, the home
 contributions, missing 31/12/2025 prices, labels for 'Other', allocation targets, new accounts, and file imports
 (broker exports, older bank history).
 
-It runs on this computer only (127.0.0.1), with a random key in the address that every change must carry, and
+`centen app` runs it on this computer only (127.0.0.1), with a random key in the address that every change must carry, and
 writes to the same database as Claude and the dashboard (which is rebuilt after each change).
 
-Start: `centen app` (opens the browser), or ask Claude (`open_update_app`).
+Start: `centen app` (opens the browser), or ask Claude (`open_update_app`). On a server, `centen web` serves the same
+app at /bijwerken behind its login.
 """
 from __future__ import annotations
 
@@ -25,6 +26,8 @@ from . import config, db
 
 PORT = 8770
 TEMPLATE = Path(__file__).with_name("app_template.html")
+# "computer" for `centen app` (127.0.0.1 on this PC), "server" when `centen web` serves it (a NAS, a home server)
+WHERE = "computer"
 _server: ThreadingHTTPServer | None = None
 _url: str | None = None
 
@@ -67,7 +70,12 @@ def state(conn, today: date | None = None) -> dict:
     from . import analysis, assets, loans, manual, review, tax
     from .categorize import CATEGORIES
     today = today or date.today()
-    out = {"today": today.isoformat(), "generated": datetime.now().strftime("%H:%M")}
+    from . import health
+    out = {"today": today.isoformat(), "generated": datetime.now().strftime("%H:%M"), "where": WHERE}
+    out["health"] = health.summary(conn, today)
+    cfg = config.load()
+    out["bank_setup"] = {"configured": bool(cfg["enablebanking"].get("app_id")),
+                         "redirect_url": cfg["enablebanking"].get("redirect_url")}
     out["savings"] = manual.list_accounts(conn)
     accs = assets.list_accounts(conn, today)
     plans = {x["account"]: x for x in loans.all_loans(conn, today)}
@@ -75,7 +83,8 @@ def state(conn, today: date | None = None) -> dict:
     for a in accs:
         item = {k: a.get(k) for k in ("name", "type", "type_label", "provider", "scope", "value", "value_entered",
                                       "stale", "days_since_value", "estimated", "contributions",
-                                      "contributions_entered", "outstanding", "positions")}
+                                      "contributions_entered", "outstanding", "positions", "contributions_complete",
+                                      "contributions_uncertain", "contributions_since")}
         item["has_trades"] = bool(conn.execute(
             "SELECT 1 FROM inv_transactions t JOIN accounts x ON x.id=t.account_id WHERE x.name=? AND x.source='asset' "
             "LIMIT 1", (a["name"],)).fetchone())
@@ -203,7 +212,41 @@ def act(conn, action: str, p: dict) -> dict:
         return remuneration.set_profile(conn, amount(p["municipal_rate"]) if str(p.get("municipal_rate") or "").strip() else None,
                                         int(amount(p["children"])) if str(p.get("children") or "").strip() else None,
                                         bool(p.get("vvprbis")) if "vvprbis" in p else None)
+    if action in ("banks", "link_start", "link_complete", "bank_sync"):
+        return _bank_action(conn, action, p)
     raise ValueError(f"Onbekende actie {action}")
+
+
+def _bank_action(conn, action: str, p: dict) -> dict:
+    """Linking a bank again from the browser (r22): start → approve at the bank → paste the address you land on."""
+    from . import enablebanking as eb
+    cfg = config.load()
+    if not cfg["enablebanking"].get("app_id"):
+        raise ValueError("Er is nog geen Enable Banking-toepassing ingesteld: voer eerst `centen init` uit (zie README).")
+    if action == "banks":
+        client = eb.Client.from_config(cfg)
+        return {"banks": sorted(b["name"] for b in client.aspsps(cfg["enablebanking"].get("country", "BE")))}
+    if action == "link_start":
+        bank = str(p.get("bank") or "").strip()
+        if not bank:
+            raise ValueError("Kies een bank.")
+        info = eb.start_link(conn, cfg, bank)
+        return {"url": info["url"], "bank": info["bank"], "valid_until": info["valid_until"][:10],
+                "redirect_url": cfg["enablebanking"]["redirect_url"]}
+    if action == "link_complete":
+        redirect = str(p.get("redirect") or "").strip()
+        if "code=" not in redirect and "error=" not in redirect:
+            raise ValueError("Plak het volledige adres waar je bank je naartoe stuurde (het bevat ?code=…).")
+        res = eb.complete_link(conn, cfg, redirect)
+        try:
+            res["sync"] = {k: v for k, v in eb.sync(conn, cfg).items() if k != "accounts"}
+        except Exception as e:  # noqa: BLE001 - the link itself worked
+            res["sync"] = {"errors": [str(e)]}
+        return res
+    # bank_sync
+    res = eb.sync(conn, cfg, force=bool(p.get("force")))
+    return {"new": sum(a.get("new_transactions") or 0 for a in res.get("accounts") or []),
+            "skipped": sum(1 for a in res.get("accounts") or [] if a.get("skipped")), "errors": res.get("errors")}
 
 
 def upload(conn, kind: str, account: str | None, filename: str, data: bytes) -> dict:

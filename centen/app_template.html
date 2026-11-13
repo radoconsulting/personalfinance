@@ -16,9 +16,9 @@ body { margin: 0; background: var(--bg); color: var(--text-1); font: 14px/1.45 s
 header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 h1 { font-size: 20px; margin: 0; } h1 span { color: var(--muted); font-weight: 400; }
 .meta { color: var(--muted); font-size: 12.5px; }
-nav { display: flex; gap: 4px; margin: 18px 0 14px; border-bottom: 1px solid var(--grid); overflow-x: auto; }
-nav button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; font: inherit; color: var(--text-2); cursor: pointer; white-space: nowrap; }
-nav button[aria-selected="true"] { color: var(--text-1); border-color: var(--text-1); font-weight: 600; }
+nav#tabs { display: flex; gap: 4px; margin: 18px 0 14px; border-bottom: 1px solid var(--grid); overflow-x: auto; }
+nav#tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; font: inherit; color: var(--text-2); cursor: pointer; white-space: nowrap; }
+nav#tabs button[aria-selected="true"] { color: var(--text-1); border-color: var(--text-1); font-weight: 600; }
 .card { background: var(--card); border: 1px solid var(--grid); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
 .card h2 { font-size: 15px; margin: 0 0 2px; } .card .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -34,12 +34,20 @@ button.ghost { font: inherit; font-size: 12.5px; padding: 4px 10px; border-radiu
 .chip.warn { color: var(--warn); } .chip.good { color: var(--good); }
 .muted { color: var(--muted); } .small { font-size: 12px; }
 .todo li { margin: 4px 0; } .todo b { font-weight: 600; }
+.todo li.critical::marker { color: var(--bad); } .todo li.warning::marker { color: var(--warn); }
+.chip.bad { color: var(--bad); }
+.steps { margin: 6px 0 0; padding-left: 20px; } .steps li { margin: 6px 0; }
+input.wide { width: 100%; max-width: 640px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .toast { position: fixed; right: 18px; bottom: 18px; max-width: 420px; padding: 10px 14px; border-radius: 10px; background: var(--text-1); color: var(--bg);
   font-size: 13px; box-shadow: 0 6px 24px rgba(0,0,0,.18); display: none; }
 .toast.err { background: var(--bad); color: #fff; }
 .drop { border: 1.5px dashed var(--axis); border-radius: 10px; padding: 20px; text-align: center; color: var(--muted); }
 .drop.over { border-color: var(--accent); color: var(--text-1); }
+@media (max-width: 600px) { .wrap { padding: 14px 12px 48px; }
+  .centen-nav ~ .wrap header h1 { display: none; }
+  nav#tabs { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+             mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); scrollbar-width: none; } }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; } @media (max-width: 860px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -93,7 +101,8 @@ async function load() {
   const r = await fetch("/api/state", {headers: {"X-Centen-Key": KEY}});
   if (!r.ok) { document.getElementById("view").textContent = "Geen toegang: open de app opnieuw via centen app."; return; }
   S = await r.json();
-  document.getElementById("meta").textContent = `Gegevens van ${dL(S.today)} ${S.generated} · enkel op deze computer · elke wijziging werkt ook het dashboard bij`;
+  const where = S.where === "server" ? "op je server" : "enkel op deze computer";
+  document.getElementById("meta").textContent = `Gegevens van ${dL(S.today)} ${S.generated} · ${where} · elke wijziging werkt ook het dashboard bij`;
   render();
 }
 async function post(action, body, btn, okMsg) {
@@ -109,17 +118,18 @@ const amt = (ph) => el("input", {class: "amt", inputmode: "decimal", placeholder
 const dt = () => { const i = el("input", {class: "dt", type: "date", "aria-label": "datum"}); i.value = S.today; return i; };
 const ageDays = d => d ? Math.round((new Date(S.today) - new Date(d)) / 864e5) : null;
 
-const TABS = [["todo", "Te doen"], ["savings", "Spaarrekeningen"], ["assets", "Beleggingen & pensioen"], ["home", "Woning & leningen"],
-  ["pension", "Pensioen"], ["label", "Labelen"], ["import", "Bestanden"], ["targets", "Doelen"], ["new", "Nieuwe rekening"]];
+const TABS = [["todo", "Te doen"], ["banks", "Banken"], ["savings", "Sparen"], ["assets", "Beleggingen & pensioen"], ["home", "Woning & leningen"],
+  ["pension", "Pensioen"], ["label", "Labelen"], ["import", "Bestanden"], ["targets", "Doelen"], ["new", "+ Rekening"]];
 function render() {
   const nav = document.getElementById("tabs"); nav.textContent = "";
   for (const [id, name] of TABS) nav.append(el("button", {role: "tab", "aria-selected": String(id === tab), onclick: () => { tab = id; render(); }}, name));
   const v = document.getElementById("view"); v.textContent = "";
-  ({todo: vTodo, savings: vSavings, assets: vAssets, home: vHome, pension: vPension, label: vLabel, import: vImport, targets: vTargets, new: vNew})[tab](v);
+  ({todo: vTodo, banks: vBanks, savings: vSavings, assets: vAssets, home: vHome, pension: vPension, label: vLabel, import: vImport, targets: vTargets, new: vNew})[tab](v);
 }
 
 function todoItems() {
   const out = [];
+  for (const i of (S.health && S.health.issues) || []) out.push([i.text, i.tab, i.severity]);
   for (const s of S.savings) {
     const d = s.balance_entered && s.balance_entered.date, a = ageDays(d);
     if (!d) out.push([`Spaarrekening ${s.name}: nog geen saldo`, "savings"]);
@@ -131,19 +141,98 @@ function todoItems() {
     if (!a.value_entered) out.push([`${a.name}: nog geen waarde`, a.type === "property" ? "home" : "assets"]);
     else if (a.stale) out.push([`${a.name}: waarde is ${a.days_since_value} dagen oud`, a.type === "property" ? "home" : "assets"]);
   }
+  for (const a of S.assets) if (a.contributions_complete === false || a.contributions_uncertain)
+    out.push([`${a.name}: totale inleg ingeven (stortingen vóór ${dL(a.contributions_since)} ${a.contributions_complete === false ? "ontbreken" : "ontbreken mogelijk"}), anders klopt het rendement niet`, "assets", "warning"]);
   if (S.missing_photo.length) out.push([`Fotomoment 31/12/2025 ontbreekt voor ${S.missing_photo.length} positie(s)`, "assets"]);
   const q = S.review.personal; if (q.groups) out.push([`${q.groups} handelaars nog te labelen (${eur(q.other_expenses)})`, "label"]);
   return out;
 }
 function vTodo(v) {
   const items = todoItems();
-  const c = el("div", {class: "card"}, el("h2", {}, "Wat kan je bijwerken"), el("div", {class: "sub"}, "Cijfers die niet via je bank of de koersen binnenkomen"));
-  c.append(items.length ? el("ul", {class: "todo"}, items.map(([t, to]) => el("li", {}, t, " ", el("button", {class: "ghost", onclick: () => { tab = to; render(); }}, "Bijwerken →"))))
+  const c = el("div", {class: "card"}, el("h2", {}, "Wat kan je bijwerken"), el("div", {class: "sub"}, "Bankkoppelingen en cijfers die niet via je bank of de koersen binnenkomen"));
+  c.append(items.length ? el("ul", {class: "todo"}, items.map(([t, to, sev]) => el("li", {class: sev || null}, t, " ",
+      to ? el("button", {class: "ghost", onclick: () => { tab = to; render(); }}, to === "banks" ? "Naar Banken →" : "Bijwerken →") : null)))
     : el("div", {class: "muted"}, "Alles is up-to-date."));
   v.append(c);
   const live = S.assets.filter(a => a.live_priced).map(a => a.name);
   if (live.length) v.append(el("div", {class: "card"}, el("h2", {}, "Gaat vanzelf"), el("div", {class: "sub"},
     `${live.join(", ")}: waarde uit je posities × live koersen. Nieuwe aankopen of verkopen? Importeer je brokerexport onder Bestanden.`)));
+}
+
+async function call(action, body) {
+  const r = await fetch("/api/act/" + action, {method: "POST", headers: {"X-Centen-Key": KEY, "Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j.result;
+}
+let linking = null;  // {bank, url, valid_until, redirect_url} while a link is being made
+const ago = iso => { if (!iso) return "nooit"; const d = new Date(iso); return isNaN(d) ? iso : d.toLocaleString("nl-BE", {day: "numeric", month: "short", hour: "2-digit", minute: "2-digit"}); };
+function vBanks(v) {
+  const H = S.health || {links: []};
+  if (!S.bank_setup || !S.bank_setup.configured) {
+    v.append(el("div", {class: "card"}, el("h2", {}, "Banken"), el("div", {class: "sub"},
+      "Nog geen Enable Banking-toepassing ingesteld. Doe dat één keer met centen init (zie README); daarna koppel je je banken hier.")));
+    return;
+  }
+  if (linking) {
+    const red = el("input", {class: "wide", placeholder: linking.redirect_url + "?state=…&code=…", "aria-label": "adres na goedkeuren"});
+    const done = el("button", {class: "go", onclick: async () => {
+      done.disabled = true;
+      try { const r = await call("link_complete", {redirect: red.value}); linking = null;
+        const n = (r.accounts || []).length, errs = (r.sync && r.sync.errors) || [];
+        toast(`${r.bank} gekoppeld tot ${String(r.valid_until || "").slice(0, 10)} · ${n} rekening(en)` + (errs.length ? ` · sync: ${errs[0]}` : " ✓"), errs.length > 0);
+        await load();
+      } catch (e) { toast(e.message, true); done.disabled = false; }
+    }}, "Koppeling afronden");
+    v.append(el("div", {class: "card"}, el("h2", {}, `${linking.bank} koppelen`),
+      el("div", {class: "sub"}, `Alleen-lezen toegang, geldig tot ${dL(linking.valid_until)}.`),
+      el("ol", {class: "steps"},
+        el("li", {}, el("a", {href: linking.url, target: "_blank", rel: "noopener"}, `Open ${linking.bank}`), " en keur goed met je bankapp, itsme of kaartlezer."),
+        el("li", {}, "Daarna kom je op een pagina die niet laadt (", el("code", {}, linking.redirect_url), "). Dat is normaal: zo verlaat de eenmalige code je toestel niet."),
+        el("li", {}, "Kopieer het volledige adres uit de adresbalk en plak het hier:", el("div", {class: "row", style: "margin-top:6px"}, red, done))),
+      el("div", {class: "row", style: "margin-top:10px"}, el("button", {class: "ghost", onclick: () => { linking = null; render(); }}, "Annuleren"))));
+    return;
+  }
+  const start = async (bank, btn) => {
+    if (btn) btn.disabled = true;
+    try { linking = await call("link_start", {bank}); render(); window.open(linking.url, "_blank", "noopener"); }
+    catch (e) { toast(e.message, true); if (btn) btn.disabled = false; }
+  };
+  const c = el("div", {class: "card"}, el("h2", {}, "Bankkoppelingen"),
+    el("div", {class: "sub"}, "Toestemming loopt tot 180 dagen (sommige banken minder). Koppel opnieuw vóór ze verloopt; je historiek blijft gewoon staan."));
+  if (!H.links.length) c.append(el("div", {class: "muted"}, "Nog geen bank gekoppeld."));
+  else c.append(el("table", {}, el("thead", {}, el("tr", {}, ["Bank", "Geldig tot", "Rekeningen", "Laatste sync", ""].map(h => el("th", {}, h)))),
+    el("tbody", {}, H.links.map(l => {
+      const left = l.days_left, st = l.status === "expired" ? el("span", {class: "chip bad"}, "verlopen")
+        : left != null && left <= 14 ? el("span", {class: "chip " + (left <= 3 ? "bad" : "warn")}, `nog ${left} d`) : el("span", {class: "chip good"}, "actief");
+      const b = el("button", {class: l.status === "expired" || (left != null && left <= 14) ? "go" : "ghost"}, "Opnieuw koppelen");
+      b.onclick = () => start(l.bank, b);
+      return el("tr", {}, el("td", {}, l.bank, st), el("td", {}, dL(l.valid_until)), el("td", {class: "num"}, l.accounts),
+        el("td", {}, ago(l.last_ok), l.last_error ? el("div", {class: "small", style: "color:var(--bad)"}, "Mislukt: " + l.last_error.message.slice(0, 160)) : null),
+        el("td", {class: "num"}, b));
+    }))));
+  const sync = el("button", {class: "ghost"}, "Nu synchroniseren");
+  sync.onclick = async () => { sync.disabled = true;
+    try { const r = await call("bank_sync", {}); toast((r.errors || []).length ? r.errors[0] : `${r.new} nieuwe verrichtingen` + (r.skipped ? ` · ${r.skipped} rekening(en) recent al bijgewerkt` : ""), (r.errors || []).length > 0); await load(); }
+    catch (e) { toast(e.message, true); sync.disabled = false; } };
+  const pick = el("select", {"aria-label": "bank"}, el("option", {value: ""}, "Andere bank koppelen…"));
+  let loaded = false;
+  pick.onfocus = async () => { if (loaded) return; loaded = true;
+    try { const r = await call("banks"); for (const b of r.banks) pick.append(el("option", {value: b}, b)); } catch (e) { toast(e.message, true); } };
+  pick.onchange = () => { if (pick.value) start(pick.value); };
+  c.append(el("div", {class: "row", style: "margin-top:12px"}, sync, pick));
+  v.append(c);
+  if (S.where === "server" && S.sessions) {
+    const out = el("button", {class: "ghost"}, "Afmelden op alle andere toestellen");
+    out.onclick = async () => { out.disabled = true;
+      try { const r = await call("logout_others"); toast(`${r.removed} toestel(len) afgemeld`); await load(); } catch (e) { toast(e.message, true); out.disabled = false; } };
+    v.append(el("div", {class: "card"}, el("h2", {}, "Aangemelde toestellen"),
+      el("div", {class: "sub"}, "Elk toestel blijft 30 dagen aangemeld. Kwijtgeraakt toestel? Meld het hier af, of verander de toegangssleutel om iedereen af te melden."),
+      el("table", {}, el("thead", {}, el("tr", {}, ["Toestel", "Aangemeld", "Laatst gezien", ""].map(h => el("th", {}, h)))),
+        el("tbody", {}, S.sessions.map(x => el("tr", {}, el("td", {}, x.agent || "onbekend"), el("td", {}, ago(x.created)), el("td", {}, ago(x.last_seen)),
+          el("td", {}, x.current ? el("span", {class: "chip good"}, "dit toestel") : null))))),
+      el("div", {class: "row", style: "margin-top:10px"}, out)));
+  }
 }
 
 function vSavings(v) {

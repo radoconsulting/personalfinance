@@ -8,9 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends tzdata ca-certi
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml README.md LICENSE ./
+COPY pyproject.toml README.md LICENSE constraints.txt ./
 COPY centen ./centen
-RUN pip install .
+RUN pip install -c constraints.txt .
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 755 /usr/local/bin/docker-entrypoint.sh

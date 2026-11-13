@@ -22,8 +22,17 @@ from datetime import date, datetime, timezone
 from . import assets as AS
 from . import config, db
 
-MEMPOOL = "https://mempool.space/api/address/{}"
+MEMPOOL = "https://mempool.space/api"
 ETH_RPC = "https://ethereum-rpc.publicnode.com"
+
+
+def endpoints() -> dict:
+    """Where wallet balances are read. Privacy: the BTC server sees every address of your wallet, from your IP, and can
+    link them together; the ETH node sees your address. Point these at your own node to avoid that, in config.json:
+    "crypto_endpoints": {"btc": "http://<nas>:3006/api" (your own mempool / Esplora / electrs HTTP API),
+                         "eth": "http://<nas>:8545" (your own Ethereum node, or any JSON-RPC endpoint)}."""
+    e = config.load().get("crypto_endpoints") or {}
+    return {"btc": (e.get("btc") or MEMPOOL).rstrip("/"), "eth": e.get("eth") or ETH_RPC}
 BITVAVO = "https://api.bitvavo.com"
 GAP = 20
 META_KEY = "crypto_sync"
@@ -465,9 +474,9 @@ def _scripts(kind: str) -> list[str]:
 
 
 def _btc_address(http, a: str) -> tuple[int, bool]:
-    r = http.get(MEMPOOL.format(a))
+    r = http.get(f"{endpoints()['btc']}/address/{a}")
     if r.status_code != 200:
-        raise ValueError(f"mempool.space {r.status_code}")
+        raise ValueError(f"BTC server {r.status_code}")
     d = r.json()
     cs, ms = d.get("chain_stats") or {}, d.get("mempool_stats") or {}
     sats = (cs.get("funded_txo_sum", 0) - cs.get("spent_txo_sum", 0) + ms.get("funded_txo_sum", 0)
@@ -506,7 +515,7 @@ def btc_balance(http, xpub: str | None = None, addresses: list[str] | None = Non
 def eth_balance(http, addresses: list[str]) -> dict:
     wei = 0
     for i, a in enumerate(addresses):
-        r = http.post(ETH_RPC, json={"jsonrpc": "2.0", "id": i + 1, "method": "eth_getBalance", "params": [a, "latest"]})
+        r = http.post(endpoints()["eth"], json={"jsonrpc": "2.0", "id": i + 1, "method": "eth_getBalance", "params": [a, "latest"]})
         d = r.json() if r.status_code == 200 else {}
         if "result" not in d:
             raise ValueError(f"Ethereum node: {(d.get('error') or {}).get('message') or r.status_code}")

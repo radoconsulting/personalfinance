@@ -34,8 +34,9 @@ def test_update_api_needs_session_and_csrf(client):
     assert client.get("/api/state").status_code == 401
     client.post("/login", data={"key": "k3y"})
     assert client.get("/api/state").status_code == 403  # no CSRF header
-    csrf = web._csrf("k3y")
+    csrf = web._csrf("k3y", client.cookies.get(web.COOKIE))
     assert "__TOKEN__" not in client.get("/bijwerken").text and csrf in client.get("/bijwerken").text
+    assert client.get("/api/state", headers={"X-Centen-Key": web._csrf("k3y", "other-session")}).status_code == 403
     st = client.get("/api/state", headers={"X-Centen-Key": csrf}).json()
     assert "savings" in st
     r = client.post("/api/act/nothing", json={}, headers={"X-Centen-Key": csrf})
@@ -112,3 +113,70 @@ def test_phone_app_files_and_offline_cache(client):
 
 def test_scheduler_alert_job_skips_without_ntfy(demo_conn):
     assert web._alerts(demo_conn) == {"skipped": "notifications not configured"}
+
+
+def test_logout_really_ends_the_session(client):
+    client.post("/login", data={"key": "k3y"})
+    sid = client.cookies.get(web.COOKIE)
+    assert client.get("/", follow_redirects=False).status_code == 200
+    client.get("/logout", follow_redirects=False)
+    client.cookies.clear()
+    client.cookies.set(web.COOKIE, sid)  # an old copy of the cookie no longer works
+    assert client.get("/", follow_redirects=False).status_code == 303
+
+
+def test_logout_other_devices_and_key_change(demo_conn):
+    K = "k3y-long-enough-for-the-check"
+    app = web.build_app(K, run_scheduler=False)
+    with TestClient(app, base_url="http://nas.local") as c:
+        c.post("/login", data={"key": K}, headers={"User-Agent": "Mozilla (Windows) Chrome/1 Safari/1"})
+        phone = c.cookies.get(web.COOKIE)
+        c.cookies.clear()
+        c.post("/login", data={"key": K}, headers={"User-Agent": "Mozilla (iPhone) Safari/1"})
+        laptop = c.cookies.get(web.COOKIE)
+        csrf = web._csrf(K, laptop)
+        st = c.get("/api/state", headers={"X-Centen-Key": csrf}).json()
+        assert len(st["sessions"]) == 2 and sum(x["current"] for x in st["sessions"]) == 1
+        assert {x["agent"] for x in st["sessions"]} == {"iPhone · Safari", "Windows · Chrome"} and st["where"] == "server"
+        r = c.post("/api/act/logout_others", json={}, headers={"X-Centen-Key": csrf})
+        assert r.json()["result"]["removed"] == 1
+        assert c.get("/", follow_redirects=False).status_code == 200
+        c.cookies.clear()
+        c.cookies.set(web.COOKIE, phone)
+        assert c.get("/", follow_redirects=False).status_code == 303
+    from contextlib import closing
+    from centen import db
+    with closing(db.connect()) as conn:
+        assert web.session_check(conn, K, laptop) and not web.session_check(conn, "a-completely-different-key", laptop)
+
+
+def test_login_is_rate_limited(client):
+    for _ in range(5):
+        assert client.post("/login", data={"key": "nope"}).status_code == 401
+    assert client.post("/login", data={"key": "k3y"}).status_code == 429
+
+
+def test_pages_have_security_headers_and_status_bar(client):
+    client.post("/login", data={"key": "k3y"})
+    for path in ("/", "/bijwerken"):
+        r = client.get(path)
+        assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
+        assert r.headers["x-content-type-options"] == "nosniff"
+        assert 'class="st"' in r.text and "Koersen" in r.text
+    assert "korter dan 20 tekens" in client.get("/").text  # "k3y" is a weak key: warned on every page
+    assert 'class="centen-warn"' not in web.nav("/", None, "")
+
+
+def test_saving_marks_the_dashboard_for_a_background_rebuild(client):
+    client.post("/login", data={"key": "k3y"})
+    client.get("/")
+    dash = client.app.state.dashboard
+    csrf = web._csrf("k3y", client.cookies.get(web.COOKIE))
+    acc = client.get("/api/state", headers={"X-Centen-Key": csrf}).json()["savings"]
+    if acc:
+        r = client.post("/api/act/savings_balance", json={"account": acc[0]["name"], "amount": "1.234"},
+                        headers={"X-Centen-Key": csrf})
+        assert r.status_code == 200 and dash.dirty.is_set()
+        dash._timer.cancel()
+        dash.build_now()
+        assert not dash.dirty.is_set()

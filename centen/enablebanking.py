@@ -201,6 +201,7 @@ def complete_link(conn, cfg: dict, redirect_or_code: str, client: Client | None 
         db.upsert_account(conn, **acc)
     if state:
         conn.execute("DELETE FROM meta WHERE key=?", (f"pending_state:{state}",))
+    db._replaced_links(conn)  # linking a bank again: the old link's accounts moved to this one
     conn.commit()
     recategorize(conn)  # new own accounts change how earlier transfers are classified
     return {"link_id": link_id, "bank": bank, "valid_until": valid_until,
@@ -267,7 +268,7 @@ def sync(conn, cfg: dict, force: bool = False, days: int = 730, client: Client |
         if link["valid_until"] and link["valid_until"][:10] < today.isoformat():
             conn.execute("UPDATE bank_links SET status='expired' WHERE id=?", (link["id"],))
             summary["errors"].append(f"Consent for {link['aspsp_name']} expired on {link['valid_until'][:10]}: "
-                                     f"run `centen link --bank \"{link['aspsp_name']}\"` again.")
+                                     f"link it again (update app → Banken, or `centen link --bank \"{link['aspsp_name']}\"`).")
             continue
         accounts = conn.execute("SELECT * FROM accounts WHERE link_id=?", (link["id"],)).fetchall()
         for acc in accounts:

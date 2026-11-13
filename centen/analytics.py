@@ -268,6 +268,11 @@ def _close(a: float, b: float, pct: float = 0.03) -> bool:
     return abs(a - b) <= max(0.05, pct * max(abs(a), abs(b)))
 
 
+# Payments whose amount depends on what you earned or spent, not on a price: never reported as a price increase.
+# (BTW is turnover minus deductible VAT on costs; VenB and personal tax are advance payments or assessments.)
+AMOUNT_VARIES = {"VAT", "Corporate tax", "Withholding tax", "Taxes & social security", "Tax refund"}
+
+
 def _last_price_change(amounts: list[float], dates: list[date]) -> dict | None:
     """Most recent step change to a new level that has held (or a single big jump after a stable run)."""
     for i in range(len(amounts) - 1, 0, -1):
@@ -342,7 +347,7 @@ def recurring(conn, today: date | None = None, lookback_days: int = 460, include
         if not active and not include_inactive:
             continue
         typical = statistics.median(amounts[-3:])
-        change = _last_price_change(amounts, ds) if is_debit else None
+        change = _last_price_change(amounts, ds) if is_debit and category not in AMOUNT_VARIES else None
         sample = items[-1]
         out.append({
             "merchant": sample["merchant"], "category": category, "kind": sample["kind"],
@@ -821,7 +826,8 @@ def position(conn, date_from: date | None = None, date_to: date | None = None, t
             "not_added_net_deposited": at["not_added_net_deposited"], "by_type": at["by_type"],
             "oldest_value": at["oldest_value"],
             "accounts": [{k: a.get(k) for k in ("name", "type", "provider", "scope", "value", "value_as_of", "estimated",
-                                                 "stale", "contributions", "gain", "gain_pct", "value_basis")}
+                                                 "stale", "contributions", "gain", "gain_pct", "value_basis",
+                                                 "contributions_complete", "contributions_uncertain")}
                          for a in asum["accounts"]],
             "net_deposited_total": inv_total, "by_destination": investments,
             "note": "Value = what you entered for each account (from the broker, insurer or bank), moved along with "

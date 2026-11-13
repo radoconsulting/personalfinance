@@ -166,58 +166,110 @@ CREATE TABLE IF NOT EXISTS inv_transactions (
     imported_at  TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_inv_tx ON inv_transactions(account_id, date);
+
+-- Logged-in browsers of the server (r22): only a hash of the cookie is stored; key_fp ties them to the access key,
+-- so changing the key logs everyone out.
+CREATE TABLE IF NOT EXISTS web_sessions (
+    id_hash    TEXT PRIMARY KEY,
+    key_fp     TEXT NOT NULL,
+    created    TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    agent      TEXT
+);
 """
 
 # Columns and tables the read-only SQL tool may never see.
 HIDDEN_COLUMNS = {("accounts", "iban"), ("transactions", "counterparty_iban"), ("transactions", "raw_json"),
                   ("accounts", "external_uid"), ("asset_links", "iban")}
-HIDDEN_TABLES = {"bank_links", "meta"}
+HIDDEN_TABLES = {"bank_links", "meta", "web_sessions"}
 
 
-_MIGRATIONS = {"accounts": [("scope", "TEXT")], "transactions": [("internal", "TEXT"), ("asset_id", "TEXT")]}
+# Schema version, stored in PRAGMA user_version. Bump it when a table, column or index is added: connect() then sets the
+# database up once; at the same version a connection does no writes at all. Steps in _STEPS run once, in order, for
+# databases older than their version (for changes CREATE ... IF NOT EXISTS can't express).
+SCHEMA_VERSION = 22
+
+_COLUMNS = {"accounts": [("scope", "TEXT")], "transactions": [("internal", "TEXT"), ("asset_id", "TEXT")]}
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    for table, cols in _MIGRATIONS.items():
+def _add_columns(conn: sqlite3.Connection) -> None:
+    for table, cols in _COLUMNS.items():
         have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
         for col, typ in cols:
             if col not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
-    conn.execute("CREATE INDEX IF NOT EXISTS ix_tx_asset ON transactions(asset_id)")
-    from .prices import SCHEMA as PRICE_SCHEMA
-    conn.executescript(PRICE_SCHEMA)
-    from .history import SCHEMA as HISTORY_SCHEMA
-    from .networth import SCHEMA as NETWORTH_SCHEMA
-    from .analysis import SCHEMA as ANALYSIS_SCHEMA
-    from .loans import SCHEMA as LOANS_SCHEMA
-    conn.executescript(HISTORY_SCHEMA + NETWORTH_SCHEMA + ANALYSIS_SCHEMA + LOANS_SCHEMA)
-    from .fixed import SCHEMA as FIXED_SCHEMA
-    from .depreciation import SCHEMA as DEPRECIATION_SCHEMA
-    conn.executescript(FIXED_SCHEMA + DEPRECIATION_SCHEMA)
 
 
-def connect(path: Path | str | None = None) -> sqlite3.Connection:
-    path = Path(path) if path else config.db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.executescript(SCHEMA)
-    _migrate(conn)
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
+def _replaced_links(conn: sqlite3.Connection) -> None:
+    """r22: links whose accounts all moved to a newer link of the same bank are 'replaced', not 'active'."""
+    conn.execute("""UPDATE bank_links SET status='replaced' WHERE status='active'
+                    AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.link_id = bank_links.id)
+                    AND EXISTS (SELECT 1 FROM bank_links n WHERE n.aspsp_name = bank_links.aspsp_name
+                                AND n.id <> bank_links.id AND n.created_at >= bank_links.created_at)""")
+
+
+_STEPS = [(22, _replaced_links)]
+
+
+def all_schemas() -> str:
+    from .analysis import SCHEMA as ANALYSIS
+    from .depreciation import SCHEMA as DEPRECIATION
+    from .fixed import SCHEMA as FIXED
+    from .history import SCHEMA as HISTORY
+    from .loans import SCHEMA as LOANS
+    from .networth import SCHEMA as NETWORTH
+    from .prices import SCHEMA as PRICES
+    return "\n".join([SCHEMA, PRICES, HISTORY, NETWORTH, ANALYSIS, LOANS, FIXED, DEPRECIATION])
+
+
+def _setup_stamp() -> str:
+    from .categorize import CATEGORIES, RULES_VERSION
+    h = hashlib.sha256(json.dumps(CATEGORIES).encode()).hexdigest()[:12]
+    return f"{SCHEMA_VERSION}|{RULES_VERSION}|{h}"
+
+
+def _setup(conn: sqlite3.Connection, version: int, new: bool) -> None:
     from .categorize import CATEGORIES, RULES_VERSION, detect_scope, recategorize  # local import: avoid a cycle
+    conn.executescript(all_schemas())
+    _add_columns(conn)
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_tx_asset ON transactions(asset_id)")
+    for v, step in _STEPS:
+        if not new and version < v:
+            step(conn)
     conn.executemany("INSERT OR REPLACE INTO categories(name, kind, grp) VALUES (?,?,?)", CATEGORIES)
     for r in conn.execute("SELECT id, name FROM accounts WHERE scope IS NULL").fetchall():
         conn.execute("UPDATE accounts SET scope=? WHERE id=?", (detect_scope(r["name"]), r["id"]))
+    conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+    set_meta(conn, "setup", _setup_stamp())
     conn.commit()
     if get_meta(conn, "rules_version") != RULES_VERSION and \
             conn.execute("SELECT 1 FROM transactions LIMIT 1").fetchone():
         recategorize(conn)  # rules changed since the data was categorised
+
+
+def connect(path: Path | str | None = None) -> sqlite3.Connection:
+    path = Path(path) if path else config.db_path()
+    new = not path.exists()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA foreign_keys=ON")
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    stamp = None
+    if version == SCHEMA_VERSION:
+        try:
+            stamp = get_meta(conn, "setup")
+        except sqlite3.OperationalError:
+            stamp = None
+    if version != SCHEMA_VERSION or stamp != _setup_stamp():
+        if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+            conn.execute("PRAGMA journal_mode=WAL")
+        _setup(conn, version, new)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
     return conn
 
 

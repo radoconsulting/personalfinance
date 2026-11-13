@@ -81,8 +81,15 @@ schedule itself (bank sync at 07:40 and 18:40, prices every hour, price history 
    `centen remote` only relays messages; the data and the bank link stay on the NAS.
 
 **Keep it private.** It is meant for your home network or a VPN such as Tailscale or WireGuard; don't forward the
-port on your router. If you put it behind a reverse proxy, use HTTPS. Back up the `data` folder (Hyper Backup,
-`centen backup`). Update with `docker compose pull && docker compose up -d`.
+port on your router. If you put it behind a reverse proxy, use HTTPS. Every night at 03:30 centen writes a copy of the
+database to `data/backups` (7 daily and 8 weekly copies kept); back up the `data` folder too (Hyper Backup).
+Update with `docker compose pull && docker compose up -d`, or pin a version with `image: ghcr.io/radoconsulting/centen:0.22.0`
+to be able to go back.
+
+**The schedule** (config.json → `schedule`): bank sync 07:40 and 18:40, prices hourly at :05 (weekends 10:05 and
+18:05), crypto 07:55, phone alerts 08:30, digest Monday 08:20, backup 03:30. A job that was missed because the server
+was down or another job ran long still runs afterwards (once, within a few hours); the dots in the top bar show when
+bank, prices and crypto were last updated, and red means the last attempt failed.
 
 Without Docker: `pip install .` and `centen web` does the same (`centen web --show-key` prints the key).
 
@@ -146,8 +153,9 @@ For Claude Code: `claude mcp add centen -- centen serve`.
 5. Later: `centen sync` (or just ask Claude to refresh: it calls `sync_bank_data`).
 
 Things to know:
-- **Consent lasts up to 180 days** (some banks allow less). `data_status` shows the expiry date. Run
-  `centen link` again when it runs out.
+- **Consent lasts up to 180 days** (some banks allow less). `data_status` shows the expiry date. Link the bank
+  again before it runs out: in the update app (**Bijwerken → Banken → Opnieuw koppelen**, also on the server) or with
+  `centen link`. With phone notifications on, you get a reminder 14 and 3 days before.
 - Banks may limit unattended access to **4 times a day per account**, so centen skips a sync within 6 hours of
   the last one unless you `--force` it.
 - Many banks only serve their full history right after you consent, and about 90 days on later syncs. That is
@@ -337,6 +345,24 @@ history). Every change goes into the same database and rebuilds the dashboard.
   Privé, "Waar zit je vermogen" on the Totaal tab, empty investment analyses replaced by one hint, the open tab kept in
   view on a phone. `centen demo --full` builds a demo with a company, investments, a home, a car and a watch.
 
+## r22: reliable on a server
+
+- **Schedule that catches up** (see above), **nightly backups** with rotation, and the dashboard rebuilt in the
+  background so a page or a Claude request never waits for it.
+- **Banken** tab in the update app: every bank link with its expiry and last sync, *Opnieuw koppelen* (start, approve
+  at the bank, paste the address you land on), *Nu synchroniseren*, and the logged-in devices. "Te doen" lists
+  expiring or failed bank links and crypto errors first.
+- **Logins**: a random session per device (logging out really ends it, "log out all other devices", a new key logs
+  everyone out), at most 5 wrong keys per 10 minutes, and a warning when `CENTEN_KEY` is shorter than 20 characters.
+  After updating you log in once more.
+- **Figures**: taxes (BTW, VenB, personal tax) are no longer reported as price increases; an investment account
+  that was valued before your bank history starts shows no return until you enter its total contributions (one whose
+  deposits run from the very start of the history is flagged with "inleg?"); "Beleggingen en pensioen" says what it
+  includes.
+- **Crypto privacy**: balances of a Ledger wallet are read from mempool.space and a public Ethereum node, which see
+  your addresses. Point them at your own node with config.json → `"crypto_endpoints": {"btc": "http://<nas>:3006/api",
+  "eth": "http://<nas>:8545"}` (any Esplora/mempool HTTP API and Ethereum JSON-RPC endpoint).
+
 ## Categories and your own rules
 
 `centen categories` lists them. Fix things from the CLI or by asking Claude:
@@ -367,7 +393,13 @@ The tests cover parsing, categorisation, every CSV layout plus CAMT.053, the Ena
 v1 (`FastMCP`) and v2 (`MCPServer`).
 
 Layout: `money.py` (Belgian parsing), `categorize.py` (rules), `importers/` (CSV, CAMT.053), `enablebanking.py`
-(PSD2 client and sync), `analytics.py` (the analyses), `server.py` (MCP tools), `cli.py`.
+(PSD2 client and sync), `analytics.py` (the analyses), `server.py` (MCP tools), `web.py` (server: login, pages, MCP
+over HTTP), `jobs.py` (schedule), `health.py` (what's out of date), `backup.py`, `cli.py`.
+
+Database changes: bump `db.SCHEMA_VERSION` (stored in `PRAGMA user_version`) and add the table to a schema or a step
+to `db._STEPS`; a database at the current version is not touched when a connection opens. The Docker image installs
+the exact versions in `constraints.txt`; CI also runs the tests without them, so a new dependency release shows up
+there first. Releases are tagged `vX.Y.Z`, which publishes `ghcr.io/radoconsulting/centen:X.Y.Z`.
 
 ## License
 

@@ -75,3 +75,24 @@ def test_template_survives_sandboxed_preview():
     for api in ("history.replaceState", "localStorage."):
         for line in (l for l in src.splitlines() if api in l):
             assert "try {" in line, line.strip()
+
+
+def test_page_scripts_parse(tmp_path):
+    """The dashboard and update app are plain JavaScript in HTML templates: a syntax error (e.g. a name declared twice)
+    would blank the page. node --check catches that without a browser; skipped when node isn't installed."""
+    import re
+    import shutil
+    import subprocess
+    from pathlib import Path
+    node = shutil.which("node")
+    if not node:
+        import pytest
+        pytest.skip("node not installed")
+    root = Path(__file__).resolve().parents[1] / "centen"
+    for name in ("dashboard_template.html", "app_template.html"):
+        html = (root / name).read_text(encoding="utf-8")
+        for i, js in enumerate(re.findall(r"<script(?![^>]*application/json)[^>]*>(.*?)</script>", html, re.S)):
+            f = tmp_path / f"{name}.{i}.js"
+            f.write_text(js, encoding="utf-8")
+            r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
+            assert r.returncode == 0, f"{name} script {i}: {r.stderr[:400]}"

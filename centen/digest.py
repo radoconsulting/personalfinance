@@ -31,13 +31,14 @@ def _eur(v) -> str:
 
 def reminders(conn, today: date) -> list[dict]:
     out = []
-    for r in conn.execute("SELECT aspsp_name, status, valid_until FROM bank_links"):
-        if r["valid_until"]:
-            left = (date.fromisoformat(r["valid_until"][:10]) - today).days
-            if left <= 30:
-                out.append({"kind": "consent", "severity": "warning" if left > 7 else "critical",
-                            "text": f"Toestemming {r['aspsp_name']} verloopt over {left} dagen: opnieuw koppelen "
-                                    f"met centen link --bank \"{r['aspsp_name']}\"."})
+    from . import health
+    for l in health.links(conn, today):
+        left = l["days_left"]
+        if left is not None and left <= 30:
+            out.append({"kind": "consent", "severity": "warning" if left > 7 else "critical",
+                        "text": (f"Toestemming {l['bank']} is verlopen" if left < 0 else
+                                 f"Toestemming {l['bank']} verloopt over {left} dagen")
+                                + ": opnieuw koppelen in Bijwerken → Banken (of centen link)."})
     try:
         from . import assets
         for a in assets.list_accounts(conn, today):

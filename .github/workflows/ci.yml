@@ -18,6 +18,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
       - run: pytest -q
+      - name: tests with the pinned versions of the Docker image
+        if: matrix.python == '3.12'
+        run: pip install -c constraints.txt -e ".[dev]" && pytest -q
 
   image:
     needs: test

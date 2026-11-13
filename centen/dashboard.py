@@ -193,7 +193,9 @@ def build(conn, path: Path | str | None = None, today: date | None = None) -> Pa
     _daily(conn, today, data)
     data.update(_extras(conn, today))
     html = render(data)
-    tmp = path.with_suffix(".tmp")
+    import os
+    import threading
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp")  # two builds at once can't clash
     tmp.write_text(html, encoding="utf-8")
     tmp.replace(path)
     return path
