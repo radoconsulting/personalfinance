@@ -288,6 +288,8 @@ function vLabel(v) {
 }
 
 function pensionFicheCard() {
+  const inp = (key, ph, val, kind) => { const i = el("input", {class: kind === "date" ? "dt" : "amt", type: kind === "date" ? "date" : "text", placeholder: ph, "aria-label": ph});
+    i.value = val == null ? "" : (kind === "date" ? val : String(val).replace(".", ",")); i.dataset.key = key; return i; };
   const f = el("div", {class: "card"}, el("h2", {}, "Pensioenfiche of mypension-certificaat"), el("div", {class: "sub"}, "De jaarlijkse fiche van je verzekeraar of het persoonlijk certificaat uit mypension.be (PDF). centen zoekt de reserve, het verwachte kapitaal en de premie; je kijkt ze na voor je ze opslaat."));
   const accSel = el("select", {"aria-label": "pensioenrekening"}, ((S.pension || {}).pension_accounts || []).map(n => el("option", {value: n}, n)));
   const file = el("input", {type: "file", accept: ".pdf", hidden: true});
@@ -300,13 +302,13 @@ function pensionFicheCard() {
       const q = new URLSearchParams({kind: "pension", name: fl.name, account: accSel.value});
       const r = await fetch("/api/upload?" + q, {method: "POST", headers: {"X-Centen-Key": KEY}, body: await fl.arrayBuffer()});
       const j = await r.json(); if (!r.ok) throw new Error(j.error);
-      const fd = j.result.found || {};
+      const R = j.result.result || j.result, fd = R.found || {};
       out.textContent = "";
       const res = inp("reserve", "reserve", fd.reserve ? fd.reserve.amount : ""), dd = inp("date", "datum", (fd.reserve && fd.reserve.date) || fd.statement_date || S.today, "date");
       const ex = inp("expected", "verwacht kapitaal", fd.expected ? fd.expected.amount : ""), pm = inp("premium", "premie / jaar", fd.premium ? fd.premium.amount : "");
       const ok = el("button", {class: "go"}, "Opslaan");
       ok.addEventListener("click", () => post("pension_values", {account: accSel.value, reserve: res.value, date: dd.value, expected: ex.value, premium: pm.value}, ok, "Fiche verwerkt"));
-      const older = j.result.newer_value;
+      const older = R.newer_value;
       if (older) out.append(el("div", {class: "small", style: "color:var(--warn,#b26b00);margin-bottom:6px"},
         `Let op: je gaf op ${dL(older.date)} al een recentere waarde in (${eur(older.amount)}). De reserve van deze fiche wordt als oudere waarde bewaard; je huidige waarde blijft staan.`));
       const src = k => fd[k] ? el("div", {class: "muted small"}, "gevonden in: " + fd[k].line) : el("div", {class: "muted small"}, "niet gevonden: vul zelf in");
