@@ -339,8 +339,8 @@ history). Every change goes into the same database and rebuilds the dashboard.
 
 - **Bezittingen** (tab, tool `possessions`): the home and other valuable things (cars, watches, art) with the value
   now, what they cost, the change, the value history, their share of your net worth, the equity in the home and what
-  a car and the home cost per year. "Other asset" accounts are possessions: they count in the net worth, not in the
-  investments' value or return.
+  a car and the home cost per year. "Other asset" accounts are possessions: they are not in the
+  investments' value or return, and since r25 not in the net worth either (only real estate is).
 - Dashboard: tabs grouped (overview · money in and out · what you own · the future · the rest), Gezin folded into
   Privé, "Waar zit je vermogen" on the Totaal tab, empty investment analyses replaced by one hint, the open tab kept in
   view on a phone. `centen demo --full` builds a demo with a company, investments, a home, a car and a watch.
@@ -404,3 +404,13 @@ there first. Releases are tagged `vX.Y.Z`, which publishes `ghcr.io/radoconsulti
 ## License
 
 GPL-3.0-or-later, see [LICENSE](LICENSE). Not affiliated with Anthropic, Enable Banking or any bank.
+
+## r24–r25: three pillars
+
+- **Overzicht**: the total net worth, split into *dagelijkse boekhouding* (bank accounts; the company's after the VAT
+  and corporate tax it still owes), *beleggingen en vermogen* (investments + real estate − loans) and *pensioen*
+  (2nd/3rd pillar contracts). The three add up to the total. Each pillar has a card with a sparkline and key figures.
+- Navigation in two levels: the pillar on top, its tabs below; every pillar tab opens with a band showing its value.
+- r25: possessions other than real estate (a car, a watch) are listed under *Woning en bezittingen* but no longer
+  counted in the net worth. Loans still count in full. Live snapshots stored earlier are corrected in the timeline.
+

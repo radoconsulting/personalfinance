@@ -1,7 +1,7 @@
 """Private and company apart (r20): what is yours to spend versus what sits in the company.
 
 Private: cash on personal accounts, personal investments, the pension (yours, but locked until the pension date),
-the home and other possessions minus the loans.
+the home minus the loans. Other possessions (a car, a watch) are listed but not counted (r25): only real estate is.
 Company: cash on company accounts minus what it still owes the tax authorities (an estimate of the VAT of the
 running quarter and this year's corporate tax not yet prepaid), company investments; and what that would leave you
 after taking it out as a dividend (VVPRbis 18 % when the shares qualify, else 30 %).
@@ -62,7 +62,7 @@ def pillars(P: dict, B: dict | None, biz: dict | None) -> dict:
     """The same total cut the other way (r24): day-to-day money, investments and wealth, pension.
 
     daily   = cash on the bank accounts (the company's after the VAT and corporate tax it still owes)
-    wealth  = investments (private + company, incl. tak 21/23) + home and possessions − loans
+    wealth  = investments (private + company, incl. tak 21/23) + real estate − loans (possessions listed, not counted)
     pension = pension contracts (2nd/3rd pillar), locked until the pension date
     The three add up to the total of `split`.
     """
@@ -71,10 +71,10 @@ def pillars(P: dict, B: dict | None, biz: dict | None) -> dict:
     daily = {"cash_personal": P["cash"], "cash_business": b["cash"] if B else None,
              "owed_business": -owed if B else None}
     daily["value"] = P["cash"] + (b["cash"] - owed if B else 0.0)
-    owned = P["property"] + P["possessions"] + b["property"] + b["possessions"]
+    owned = P["property"] + b["property"]
     loans = P["loans"] + b["loans"]
     wealth = {"investments_personal": P["investments"], "investments_business": b["investments"] if B else None,
-              "property": P["property"] + b["property"], "possessions": P["possessions"] + b["possessions"],
+              "property": P["property"] + b["property"], "possessions_not_counted": P["possessions"] + b["possessions"],
               "loans": -loans, "owned_net": owned - loans}
     wealth["value"] = P["investments"] + b["investments"] + owned - loans
     pension = {"value": P["pension"]}
@@ -106,13 +106,13 @@ def split(conn, today: date | None = None) -> dict:
         (B if u["scope"] == "business" else P)["investments"] += max(0.0, u["net_deposited"])
     for l in accs["loans"]:
         (B if l["scope"] == "business" else P)["loans"] += abs(l.get("outstanding") or 0)
-    p_net = P["cash"] + P["investments"] + P["pension"] + P["possessions"] + P["property"] - P["loans"]
+    p_net = P["cash"] + P["investments"] + P["pension"] + P["property"] - P["loans"]  # r25: not the possessions
     out = {"personal": {k: r2(v) for k, v in P.items()}, "business": {k: r2(v) for k, v in B.items()}}
     out["personal"].update({
         "net_worth": r2(p_net),
         "available_now": r2(P["cash"] + P["investments"]),
         "locked": r2(P["pension"]),
-        "owned": r2(P["property"] + P["possessions"] - P["loans"]),
+        "owned": r2(P["property"] - P["loans"]),
     })
     has_bv = bool(conn.execute("SELECT 1 FROM accounts WHERE scope='business' LIMIT 1").fetchone())
     if has_bv:
@@ -120,7 +120,7 @@ def split(conn, today: date | None = None) -> dict:
         cit = corporate_tax_due(conn, today)
         owed = (vat["amount"] or 0) + (cit["amount"] or 0)
         free = B["cash"] - owed
-        b_net = free + B["investments"] + B["possessions"] + B["property"] - B["loans"]
+        b_net = free + B["investments"] + B["property"] - B["loans"]
         prof = R.profile(conn)
         rate = R.DIVIDEND["vvprbis"] if prof.get("vvprbis") else R.DIVIDEND["ordinary"]
         out["business"].update({

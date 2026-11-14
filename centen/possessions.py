@@ -104,15 +104,17 @@ def overview(conn, today: date | None = None) -> dict:
     for i in items:
         by_kind[i["kind"]] = r2(by_kind.get(i["kind"], 0) + (i["value"] or 0))
     nw = A.position(conn, today=today)["net_worth"]["total"] if items else None
-    for i in items:
-        i["share_of_net_worth"] = round(i["value"] / nw, 4) if nw and i["value"] else None
+    for i in items:  # r25: only real estate counts in the net worth; the rest is listed, not counted
+        i["counted_in_net_worth"] = i["kind"] == "Woning"
+        i["share_of_net_worth"] = round(i["value"] / nw, 4) if nw and i["value"] and i["counted_in_net_worth"] else None
     return {
         "today": today.isoformat(), "items": items, "total": r2(total), "by_kind": by_kind,
         "home": {"value": r2(home_value), "loans": r2(owed), "equity": r2(home_value - owed) if home_value else None,
                  "loan_to_value": round(owed / home_value, 4) if home_value else None,
                  "interest_this_year": (lo or {}).get("this_year", {}).get("interest")},
         "without_home": r2(total - home_value), "net_worth": r2(nw),
-        "share_of_net_worth": round(total / nw, 4) if nw else None,
+        "share_of_net_worth": round(home_value / nw, 4) if nw and home_value else None,  # r25: the home only
+        "not_counted": r2(total - home_value),
         "running_costs_12m": running_costs(conn, today) if items else {},
         "notes": "Waarde = je laatste ingegeven waarde, of het afschrijvingsschema als je dat koos. Kosten = betalingen "
                  "van de laatste 12 maanden in die categorieën, zonder aan- of verkoop. Iets toevoegen: bijwerk-app → "

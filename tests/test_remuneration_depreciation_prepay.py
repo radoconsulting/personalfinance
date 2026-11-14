@@ -239,7 +239,7 @@ def test_money_back_in_a_spending_category_is_a_one_off_too(demo_conn):
 
 # --- r19: possessions -----------------------------------------------------------------------------------------
 
-def test_possessions_are_not_investments_but_count_in_net_worth(demo_conn):
+def test_possessions_are_listed_but_not_in_net_worth(demo_conn):
     from centen import analytics as A, possessions
     assets.add_account(demo_conn, "Broker", "investment", value=50000, value_date="2026-11-01", today=TODAY)
     before = A.position(demo_conn, today=TODAY)["net_worth"]["total"]
@@ -249,11 +249,19 @@ def test_possessions_are_not_investments_but_count_in_net_worth(demo_conn):
     T = assets.summary(demo_conn, TODAY)["totals"]
     assert T["investments_value"] == inv_before and T["possessions"] == pytest.approx(148500, abs=1)
     after = A.position(demo_conn, today=TODAY)["net_worth"]
-    assert after["total"] == pytest.approx(before + 148500, abs=1) and after["possessions"] == pytest.approx(148500, abs=1)
+    # r25: only real estate counts in the net worth; a car or a watch is listed, not counted
+    assert after["total"] == pytest.approx(before, abs=1) and after["possessions"] == pytest.approx(148500, abs=1)
     o = possessions.overview(demo_conn, TODAY)
     kinds = {i["name"]: i["kind"] for i in o["items"]}
     assert kinds == {"Porsche 718": "Wagen", "Rolex Submariner": "Horloge & juwelen"}
     car = next(i for i in o["items"] if i["name"] == "Porsche 718")
     assert car["cost"] == 139000 and car["cost_basis"] == "aankoopprijs" and car["change"] == pytest.approx(0, abs=0.5)
-    assert o["total"] == pytest.approx(148500, abs=1) and 0 < o["share_of_net_worth"] < 1
+    assert o["total"] == pytest.approx(148500, abs=1) and o["not_counted"] == pytest.approx(148500, abs=1)
+    assert all(i["counted_in_net_worth"] is False and i["share_of_net_worth"] is None for i in o["items"])
+    from centen import networth, scopes
+    s = scopes.split(demo_conn, TODAY)
+    assert s["pillars"]["wealth"]["possessions_not_counted"] == pytest.approx(148500, abs=1)
+    assert s["total"] == pytest.approx(A.position(demo_conn, today=TODAY)["net_worth"]["total"] - (s["business"] or {}).get("owed_estimate", 0), abs=1)
+    last = networth.reconstruct(demo_conn, TODAY)["last"]
+    assert last["property"] == pytest.approx(assets.summary(demo_conn, TODAY)["totals"]["property"], abs=1)
     assert "Wagen" in o["running_costs_12m"]

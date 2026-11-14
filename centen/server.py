@@ -87,7 +87,10 @@ to the pension date), `scenario_plan` (wealth projection and financial independe
 r18: `remuneration_vs_dividend` + `set_tax_profile`, `add_vehicle` / `set_depreciation` (a car at a depreciating value
 in the net worth), `loan_prepayment` (pay off or invest), `import_pension_statement` (read the insurer's pension fiche).
 r19: `possessions` (home, cars, watches: value, purchase price, change, running costs). 'asset' accounts are possessions:
-they count in the net worth but not in the investments' value or return. Dashboard tab "Bezittingen".
+they are not in the investments' value or return, and since r25 not in the net worth either: only real estate counts
+(a car or watch is listed with its value, but not added to the total). Loans still count in full.
+r24/r25 dashboard: Overzicht with the total split into three pillars — dagelijkse boekhouding (cash), beleggingen en
+vermogen (investments + real estate − loans), pensioen (2nd/3rd pillar contracts); `scopes` returns them as `pillars`.
 
 How to help:
 - Answer in the user's language (often Dutch or French) and in everyday words. Explain Belgian banking terms when

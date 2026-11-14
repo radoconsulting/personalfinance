@@ -636,13 +636,13 @@ function cashSub(scope) {
 function netWorthSub() {
   const W = D.net_worth, T = D.investments.totals, parts = ["Liquide middelen + beleggingen"];
   if (T.property) parts.push("woning");
-  if (T.possessions) parts.push("bezittingen");
   let txt = parts.join(" + ") + (T.loans_outstanding ? " − leningen" : "") + ".";
   const est = D.investments.accounts.filter(a => a.estimated).length, noval = W.without_value.length;
   if (est) txt += ` ${est} waarde${est > 1 ? "n" : ""} geschat (laatste waarde + stortingen).`;
   if (noval) txt += ` Zonder waarde, aan inleg: ${W.without_value.join(", ")}.`;
   if (T.not_added_net_deposited) txt += ` Brokers nog niet toegevoegd tellen aan netto inleg.`;
   if (!T.property) txt += " Woning niet inbegrepen.";
+  if (T.possessions) txt += ` Andere bezittingen (${eur(T.possessions)}) tellen niet mee.`;
   if (!T.loans_outstanding) txt += " Openstaande leningen niet ingegeven.";
   return txt;
 }
@@ -682,7 +682,7 @@ const shareOf = (x, t) => t > 0 && x != null ? pct(Math.max(0, x) / t) : "—";
 function pillarSub(key) {
   const PV = pillarValues(), Q = PV.P, O = X("pension");
   if (key === "daily") return Q ? `liquide privé ${eur(Q.daily.cash_personal)}` + (Q.daily.cash_business != null ? ` · BV ${eur(Q.daily.cash_business + Q.daily.owed_business)} na btw en VenB` : "") : "zicht- en spaarrekeningen";
-  if (key === "wealth") return Q ? `beleggingen ${eur((Q.wealth.investments_personal || 0) + (Q.wealth.investments_business || 0))} · woning en bezittingen netto ${eur(Q.wealth.owned_net)}` : "beleggingen, woning en bezittingen min leningen";
+  if (key === "wealth") return Q ? `beleggingen ${eur((Q.wealth.investments_personal || 0) + (Q.wealth.investments_business || 0))} · vastgoed netto ${eur(Q.wealth.owned_net)}` : "beleggingen en vastgoed min leningen";
   return (O && O.years_to_retirement != null ? `${eur(O.monthly_income_today_eur)} per maand vanaf ${dLabel(O.retirement_date)} · ` : "") + "vast tot je pensioendatum";
 }
 function pillarBand(sec) {
@@ -769,12 +769,12 @@ function viewTotal(v) {
     ["Beleggingen privé", eur(invP != null ? invP : investTotal() - ((T.by_type || {}).pension || 0))],
     invB ? ["Beleggingen BV", eur(invB)] : null,
     PT.day_change != null ? ["Vandaag (live koersen)", eurS(PT.day_change), PT.day_change < 0 ? "var(--neg)" : null] : null,
-    {h: "Woning en bezittingen"},
+    {h: "Vastgoed"},
     Q && Q.wealth.property ? ["Woning", eur(Q.wealth.property)] : null,
-    Q && Q.wealth.possessions ? ["Andere bezittingen", eur(Q.wealth.possessions)] : null,
+
     Q && Q.wealth.loans ? ["Leningen", eur(Q.wealth.loans), "var(--neg)"] : null,
-    Q ? ["Netto", eur(Q.wealth.owned_net)] : ["Netto", eur((T.property || 0) + (T.possessions || 0) - (T.loans_outstanding || 0))],
-  ], "wealth");
+    Q ? ["Netto", eur(Q.wealth.owned_net)] : ["Netto", eur((T.property || 0) - (T.loans_outstanding || 0))],
+  ], "wealth", (Q ? Q.wealth.possessions_not_counted : T.possessions) ? `Andere bezittingen (${eur(Q ? Q.wealth.possessions_not_counted : T.possessions)}: wagen, horloge…) tellen niet mee in je vermogen; je ziet ze onder Woning en bezittingen.` : null);
   const has = O && O.years_to_retirement != null;
   const pension = pillarCard(PILLARS[2], [
     ["Kapitaal 2e en 3e pijler nu", eur(PV.pension)],
@@ -797,7 +797,7 @@ function viewTotal(v) {
       {h: "Privé · van jou"},
       ["Vrij beschikbaar (liquide en beleggingen)", eur(SP.available_now)],
       ["Vast tot je pensioen", eur(SP.locked)],
-      ["Woning en bezittingen min leningen", eur(SP.owned)],
+      ["Vastgoed min leningen", eur(SP.owned)],
       ["Privévermogen", eur(SP.net_worth)],
       SB ? {h: "BV · van de vennootschap"} : null,
       SB ? ["Vrij in de BV", eur(SB.net_worth)] : null,
@@ -1575,10 +1575,11 @@ function viewPossessions(v) {
   const others = PO.items.filter(i => i.kind !== "Woning");
   v.append(el("div", {class: "grid g4"},
     el("div", {class: "card tile hero span2"}, el("div", {class: "lbl"}, "Bezittingen"), el("div", {class: "val"}, eur(PO.total)),
-      el("div", {class: "sub"}, (PO.share_of_net_worth != null ? `${pct(PO.share_of_net_worth)} van je vermogen · ` : "") + Object.entries(PO.by_kind).map(([k, x]) => `${k.toLowerCase()} ${eur(x)}`).join(" · "))),
+      el("div", {class: "sub"}, Object.entries(PO.by_kind).map(([k, x]) => `${k.toLowerCase()} ${eur(x)}`).join(" · ") +
+        (PO.not_counted ? ` · enkel vastgoed telt mee in je vermogen` : ""))),
     PO.home.value ? tile("Netto in je woning", eur(PO.home.equity), `woning ${eur(PO.home.value)} − leningen ${eur(PO.home.loans)}`)
       : tile("Woning", "—", "geen woning toegevoegd", "placeholder"),
-    tile("Zonder woning", eur(PO.without_home), others.length ? others.map(i => i.name).slice(0, 3).join(", ") : "nog niets toegevoegd"),
+    tile("Zonder woning", eur(PO.without_home), others.length ? others.map(i => i.name).slice(0, 3).join(", ") + " · niet in je vermogen" : "nog niets toegevoegd"),
   ));
   const t = card("Wat je bezit", "Waarde nu tegenover wat het kostte (aankoopprijs) of de eerste waarde die je ingaf");
   t.body.append(table([
@@ -1589,7 +1590,7 @@ function viewPossessions(v) {
     {label: "Verschil", num: true, get: r => r.change == null ? "—" : Math.abs(r.change) < 0.5 ? el("span", {class: "muted"}, "—") : el("span", {style: `color:var(${r.change < 0 ? "--neg" : "--pos"})`}, `${eurS(r.change)}` + (r.change_pct != null ? ` (${pctS(r.change_pct)})` : ""))},
     {label: "Waardeverloop", get: r => r.depreciation ? `−${pct(r.depreciation.yearly_rate)} per jaar (${eur(r.depreciation.per_month_next_year)} / maand)` : "vaste waarde tot je ze aanpast"},
     {label: "Bijgewerkt", num: true, get: r => r.value_date ? dLabel(r.value_date) : "—"},
-    {label: "Aandeel", num: true, get: r => r.share_of_net_worth == null ? "—" : pct(r.share_of_net_worth)}], PO.items));
+    {label: "In vermogen", num: true, get: r => r.counted_in_net_worth === false ? el("span", {class: "muted"}, "niet meegeteld") : r.share_of_net_worth == null ? "—" : pct(r.share_of_net_worth)}], PO.items));
   t.root.style.marginTop = "14px";
   v.append(t.root);
   const g = el("div", {class: "grid g2", style: "margin-top:14px;align-items:start"});

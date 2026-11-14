@@ -142,8 +142,8 @@ def test_pillars_add_up_to_the_total(conn):
     assert pl["daily"]["value"] == pytest.approx(P["cash"] + B["free_cash"], abs=0.05)
     assert pl["daily"]["owed_business"] == pytest.approx(-B["owed_estimate"], abs=0.05)
     assert pl["pension"]["value"] == pytest.approx(P["pension"], abs=0.05)
-    assert pl["wealth"]["owned_net"] == pytest.approx(pl["wealth"]["property"] + pl["wealth"]["possessions"]
-                                                      + pl["wealth"]["loans"], abs=0.05)
+    assert pl["wealth"]["owned_net"] == pytest.approx(pl["wealth"]["property"] + pl["wealth"]["loans"], abs=0.05)
+    assert pl["wealth"]["possessions_not_counted"] >= 0  # r25: listed, not in the total
 
 
 def test_pillars_without_company(tmp_path):
@@ -181,3 +181,17 @@ def test_dashboard_snapshot_keeps_the_pension_part(conn, tmp_path):
     # without the investments the pension part is unknown, not zero
     networth.snapshot(conn, T, {"net_worth": data["net_worth"], "cash": pos["cash"]})
     assert [p for p in networth.timeline(conn)["points"] if p["source"] == "live"][-1]["pension"] is None
+
+
+def test_old_live_snapshot_drops_the_possessions(conn):
+    """r25: a live snapshot stored before r25 counted the possessions; the timeline takes them out."""
+    import json
+    networth.reconstruct(conn, T)
+    networth.snapshot(conn, T)
+    row = conn.execute("SELECT * FROM networth_snapshots WHERE source='live'").fetchone()
+    pj = json.loads(row["parts_json"]); pj.pop("possessions_counted"); pj["possessions"] = 10000.0
+    conn.execute("UPDATE networth_snapshots SET total=total+10000, property=property+10000, parts_json=? "
+                 "WHERE source='live'", (json.dumps(pj),))
+    live = [p for p in networth.timeline(conn)["points"] if p["source"] == "live"][-1]
+    assert live["total"] == pytest.approx(row["total"], abs=0.05)
+    assert live["property"] == pytest.approx(row["property"], abs=0.05)

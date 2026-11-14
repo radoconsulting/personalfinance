@@ -55,10 +55,11 @@ def snapshot(conn, today: date | None = None, position: dict | None = None) -> d
     pension = None if bt is None else (bt.get("pension") or 0)
     row = {"date": today.isoformat(), "source": "live", "cash_personal": r2(cash.get("personal")),
            "cash_business": r2(cash.get("business")), "investments": r2(nw.get("investments")),
-           "property": r2((nw.get("property") or 0) + (nw.get("possessions") or 0)), "loans": r2(abs(nw.get("loans") or 0)), "total": r2(nw.get("total"))}
+           "property": r2(nw.get("property")), "loans": r2(abs(nw.get("loans") or 0)), "total": r2(nw.get("total"))}
     conn.execute("INSERT OR REPLACE INTO networth_snapshots(date, source, cash_personal, cash_business, investments, "
                  "property, loans, total, parts_json) VALUES (?,?,?,?,?,?,?,?,?)",
-                 (*row.values(), json.dumps({**nw, "pension": r2(pension) if pension is not None else None,
+                 (*row.values(), json.dumps({**nw, "possessions_counted": False,  # r25: only real estate in the total
+                                             "pension": r2(pension) if pension is not None else None,
                                              "business_other": r2((nw.get("by_scope") or {}).get("business", 0)
                                                                   - (cash.get("business") or 0))}, default=str)))
     conn.commit()
@@ -188,7 +189,7 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
 
     inv = defaultdict(dict)       # account name -> {date: value}
     other = {"property": defaultdict(float), "loans": defaultdict(float)}
-    biz_other = defaultdict(float)  # r20: property/possessions minus loans of company accounts
+    biz_other = defaultdict(float)  # r20: property minus loans of company accounts
     missing_prices = set()
     walls = {}                    # crypto moved out: e -> key -> qty
     backcast = {}                 # accounts valued before their first entered value: name -> date of that value
@@ -273,7 +274,9 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
                 other["property"][e] += abs(vals[0][1])
                 home_back[a["name"]] = vals[0][0][:10]
                 continue
-            if typ in ("property", "loan", "asset"):  # possessions (a car, a watch) go with the home (r19)
+            if typ == "asset":  # r25: possessions (a car, a watch) are not part of the net worth
+                continue
+            if typ in ("property", "loan"):
                 if not vals or e < date.fromisoformat(vals[0][0][:10]):
                     continue
                 v = AS._value_at(a, vals, fl, e)
@@ -351,6 +354,14 @@ def reconstruct(conn, today: date | None = None, store: bool = True) -> dict:
             "missing_prices": sorted(missing_prices), "last": rows[-1]}
 
 
+def _business_share_of_possessions(conn) -> float:
+    """The share of the possessions held by the company today (to correct pre-r25 snapshots)."""
+    from . import assets as AS
+    things = [a for a in AS.summary(conn)["accounts"] if a["type"] == "asset"]
+    tot = sum(AS.counted_value(a) for a in things)
+    return sum(AS.counted_value(a) for a in things if a["scope"] == "business") / tot if tot else 0.0
+
+
 def timeline(conn, months: int | None = None) -> dict:
     """Month-end points (reconstructed, then the last live snapshot of each month) plus the latest live value."""
     from .db import get_meta
@@ -363,6 +374,7 @@ def timeline(conn, months: int | None = None) -> dict:
                 (r["source"] == cur["source"] and r["date"] >= cur["date"]):
             pts[m] = dict(r)
     pension_names = {r[0] for r in conn.execute("SELECT name FROM accounts WHERE source='asset' AND account_type='pension'")}
+    biz_share = _business_share_of_possessions(conn)
     ms = sorted(pts)
     if months:
         ms = ms[-months:]
@@ -395,6 +407,16 @@ def timeline(conn, months: int | None = None) -> dict:
             pt["pension"] = None
         if pj.get("no_bank_data"):
             pt["no_bank_data"] = True
+        # r25: a live snapshot from before r25 counted the possessions (in property and the total): take them out
+        if pts[m]["source"] == "live" and "possessions_counted" not in pj and pj.get("possessions"):
+            pos = pj["possessions"]
+            pt["property"] = r2(max(0.0, (pt["property"] or 0) - pos))
+            if pt["total"] is not None:
+                pt["total"] = r2(pt["total"] - pos)
+            if pj.get("business_other") is not None:
+                pj["business_other"] -= pos * biz_share
+            elif (pj.get("by_scope") or {}).get("business") is not None:
+                pj["by_scope"]["business"] -= pos * biz_share
         # r20: private and company apart (the company part: its cash plus what else its accounts hold)
         bo = pj.get("business_other")
         if bo is None and (pj.get("by_scope") or {}).get("business") is not None:

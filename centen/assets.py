@@ -589,8 +589,8 @@ def latest_positions(conn) -> list[dict]:
 def summary(conn, today: date | None = None) -> dict:
     today = _today(today)
     accounts = list_accounts(conn, today)
-    # "asset" (a car, a watch) is a possession, not an investment: it counts in the net worth, not in the
-    # investments' value and return (r19).
+    # "asset" (a car, a watch) is a possession, not an investment: not in the investments' value and return (r19),
+    # and since r25 not in the net worth either (only real estate is); its value is still listed under `possessions`.
     inv = [a for a in accounts if a["type"] in INVESTING_ASSET_TYPES and a["type"] != "asset"]
     things = [a for a in accounts if a["type"] == "asset"]
     loans = [a for a in accounts if a["type"] == "loan"]
@@ -599,6 +599,7 @@ def summary(conn, today: date | None = None) -> dict:
     by_type, by_scope = defaultdict(float), defaultdict(float)
     for a in inv + prop + things:
         by_type[a["type"]] += counted_value(a)
+    for a in inv + prop:  # r25: possessions (a car, a watch) are listed, but not part of the net worth
         by_scope[a["scope"]] += counted_value(a)
     valued = [a for a in inv if a.get("value") is not None and a.get("contributions") is not None
               and a.get("contributions_complete", True)]
@@ -627,8 +628,8 @@ def summary(conn, today: date | None = None) -> dict:
         "oldest_value": min((a["value_entered"]["date"] for a in values), default=None),
         "accounts_without_value": [a["name"] for a in inv + prop + things + loans if not a.get("value_entered")],
     }
-    totals["assets_net"] = r2((totals["investments_value"] or 0) + (totals["property"] or 0)
-                              + (totals["possessions"] or 0) + un_pos
+    # r25: the net worth counts real estate, not other possessions (they lose value and aren't sold to live from)
+    totals["assets_net"] = r2((totals["investments_value"] or 0) + (totals["property"] or 0) + un_pos
                               - (totals["loans_outstanding"] or 0))
     return {"accounts": [a for a in accounts if a["type"] != "loan"], "loans": loans, "not_added": un,
             "totals": totals}
